@@ -1,70 +1,78 @@
-<title>WEB1 - Welcome</title>
-<meta charset="utf-8">
-
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="ko">
 <head>
-
-  <!-- Global site tag (gtag.js) - Google Analytics -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=UA-134042554-1"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-
-    gtag('config', 'UA-134042554-1');
-  </script>
-
-<body>
-  <h1><a href="index.html">WEB</a></h1>
-  <ol>
-    <li><a href="1.html">HTML</a></li>
-    <li><a href="2.html">CSS</a></li>
-    <li><a href="3.html">JavaScript</a></li>
-  </ol>
-  <h2>WEB</h2>
-  <p>
-    <iframe width="560" height="315" src="https://www.youtube.com/embed/4sk0uDbM5lc" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-  </p>
-  <p>WEB is a computer programming system created by Donald E. Knuth as the first implementation of what he called "literate programming": the idea that one could create software as works of literature, by embedding source code inside descriptive text, rather than the reverse (as is common practice in most programming languages), in an order that is convenient for exposition to human readers, rather than in the order demanded by the compiler.</p>
-  <div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://primitive-web.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-<script id="dsq-count-scr" src="//primitive-web.disqus.com/count.js" async></script>
-
-
-<!--Start of Tawk.to Script-->
-<script type="text/javascript">
-var Tawk_API=Tawk_API||{}, Tawk_LoadStart=new Date();
-(function(){
-var s1=document.createElement("script"),s0=document.getElementsByTagName("script")[0];
-s1.async=true;
-s1.src='https://embed.tawk.to/5c5bdbab7cf662208c946e5e/default';
-s1.charset='UTF-8';
-s1.setAttribute('crossorigin','*');
-s0.parentNode.insertBefore(s1,s0);
-})();
-</script>
-<!--End of Tawk.to Script-->
-
-
-</body>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>회의록 작성기</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
+<body>
+  <header class="app-header">
+    <h1>📝 회의록 작성기</h1>
+    <p class="subtitle">브라우저에 자동 저장되는 간단한 회의록 도구</p>
+  </header>
+
+  <main class="layout">
+    <!-- 왼쪽: 저장된 회의록 목록 -->
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <button id="new-btn" class="btn btn-primary">+ 새 회의록</button>
+        <input id="search" type="search" placeholder="제목·내용 검색…" />
+      </div>
+      <ul id="list" class="list"></ul>
+      <p id="empty-list" class="muted hidden">저장된 회의록이 없습니다.</p>
+    </aside>
+
+    <!-- 오른쪽: 작성/편집 폼 -->
+    <section class="editor">
+      <form id="form">
+        <div class="row">
+          <label class="field grow">
+            <span>제목</span>
+            <input id="title" type="text" placeholder="예) 3분기 기획 회의" required />
+          </label>
+          <label class="field">
+            <span>날짜</span>
+            <input id="date" type="date" required />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>참석자 <small class="muted">(쉼표로 구분)</small></span>
+          <input id="attendees" type="text" placeholder="홍길동, 김철수, 이영희" />
+        </label>
+
+        <label class="field">
+          <span>안건</span>
+          <textarea id="agenda" rows="2" placeholder="오늘 논의할 안건"></textarea>
+        </label>
+
+        <label class="field">
+          <span>논의 내용</span>
+          <textarea id="discussion" rows="6" placeholder="회의에서 오간 내용을 기록하세요"></textarea>
+        </label>
+
+        <label class="field">
+          <span>결정 사항</span>
+          <textarea id="decisions" rows="3" placeholder="합의·결정된 사항"></textarea>
+        </label>
+
+        <label class="field">
+          <span>실행 항목 (Action Items) <small class="muted">(한 줄에 하나)</small></span>
+          <textarea id="actions" rows="3" placeholder="홍길동 - 보고서 초안 작성 (6/20까지)"></textarea>
+        </label>
+
+        <div class="actions-bar">
+          <button type="submit" class="btn btn-primary">저장</button>
+          <button type="button" id="print-btn" class="btn">인쇄 / PDF</button>
+          <button type="button" id="export-btn" class="btn">텍스트 내보내기</button>
+          <button type="button" id="delete-btn" class="btn btn-danger hidden">삭제</button>
+          <span id="status" class="status"></span>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
 </html>
