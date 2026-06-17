@@ -1,0 +1,20 @@
+{
+  "name": "primitive-web",
+  "version": "2.0.0",
+  "description": "영문 장문 링크를 던지면 원문 의도에 충실하게 한글로 번역·구조화·증류해 읽을거리로 만들어주는 리더 (AI 동향 / 반도체 마케터 관점)",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-html-parser": "^6.1.13"
+  }
+}
