@@ -93,9 +93,10 @@
     $("r-source").textContent = viaLabel(r.via);
     $("r-title").textContent = r.koreanTitle || r.originalTitle || "(제목 없음)";
     $("r-original").textContent = r.originalTitle ? `원제: ${r.originalTitle}` : "";
+    $("r-date").textContent = r.publishedDate ? `작성일: ${r.publishedDate}` : "";
     $("r-oneliner").textContent = r.oneLiner || "";
     $("r-topic").textContent = r.topic || "";
-    fillList("r-insight", r.marketerInsight);
+    renderInsight(r);
     renderSections(r.sections);
     renderTerms(r.keyTerms);
 
@@ -116,6 +117,31 @@
       const li = document.createElement("li"); li.textContent = t; ul.appendChild(li);
     });
   }
+  // 핵심 시사점 + 반도체 마케터 관점(연관도 정직 표시). 구버전 기록(marketerInsight) 호환.
+  function renderInsight(r) {
+    // 핵심 시사점
+    fillList("r-takeaways", r.keyTakeaways || []);
+
+    const angle = r.marketerAngle;
+    const relEl = $("r-relevance");
+    const noneEl = $("r-angle-none");
+
+    if (angle && typeof angle === "object") {
+      const labels = { high: "연관도 높음", medium: "연관도 보통", low: "연관도 낮음", none: "직접 연관 없음" };
+      relEl.textContent = labels[angle.relevance] || "";
+      relEl.className = "relevance rel-" + (angle.relevance || "none");
+      const notes = angle.notes || [];
+      fillList("r-angle", notes);
+      noneEl.classList.toggle("hidden", notes.length > 0);
+    } else {
+      // 구버전: marketerInsight 배열을 그대로 표시
+      relEl.textContent = "";
+      relEl.className = "relevance";
+      fillList("r-angle", r.marketerInsight || []);
+      noneEl.classList.add("hidden");
+    }
+  }
+
   function renderSections(sections) {
     const wrap = $("r-sections"); wrap.innerHTML = "";
     (sections || []).forEach((s) => {
@@ -165,7 +191,9 @@
 
   function searchText(r) {
     return [r.koreanTitle, r.originalTitle, r.oneLiner, r.topic,
-      ...(r.marketerInsight || []), ...(r.sections || []).map((s) => s.heading + " " + s.content)]
+      ...(r.keyTakeaways || []), ...(r.marketerInsight || []),
+      ...((r.marketerAngle && r.marketerAngle.notes) || []),
+      ...(r.sections || []).map((s) => s.heading + " " + s.content)]
       .filter(Boolean).join(" ").toLowerCase();
   }
   function markActive() {

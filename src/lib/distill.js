@@ -1,5 +1,6 @@
 // 영문 본문을 받아 한글로 번역·구조화·증류한다. (Claude claude-opus-4-8)
-// 독자 페르소나(반도체 마케터 · AI 동향 관심)에 맞춰 시사점을 강조한다.
+// 독자 페르소나(반도체 마케터·AI 동향 관심)는 "기본 렌즈"로 쓰되,
+// 무관한 글까지 억지로 반도체와 연결하지 않도록 — 연관도를 정직하게 표시한다.
 import Anthropic from "@anthropic-ai/sdk";
 
 const MODEL = "claude-opus-4-8";
@@ -17,16 +18,36 @@ const SCHEMA = {
   properties: {
     koreanTitle: { type: "string", description: "원문 제목의 한글 번역" },
     originalTitle: { type: "string", description: "원문 제목(영문 그대로)" },
+    publishedDate: { type: "string", description: "원문에 적힌 작성/게재 날짜. 없으면 빈 문자열" },
     oneLiner: { type: "string", description: "이 글의 핵심을 한 문장으로 증류" },
     topic: { type: "string", description: "이 글이 무엇에 관한 글인지 2~4문장으로 설명한 주제·맥락" },
-    marketerInsight: {
+    keyTakeaways: {
       type: "array",
       items: { type: "string" },
-      description: "반도체 마케터·AI 동향 관점에서의 시사점·읽을 가치 (3~5개)",
+      description: "글 자체의 핵심 시사점(보편적, 원문 근거 기반). 누가 읽어도 유효한 통찰 3~5개",
+    },
+    marketerAngle: {
+      type: "object",
+      description: "반도체 마케터(AI 동향 관심) 관점에서의 연관성. 억지로 연결하지 말 것.",
+      properties: {
+        relevance: {
+          type: "string",
+          enum: ["high", "medium", "low", "none"],
+          description: "이 글이 반도체·AI 마케팅과 실제로 얼마나 연관되는지 정직하게",
+        },
+        notes: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "반도체 마케터 관점의 해석·시사점(모델의 해석임). 연관이 약하면 그렇다고 솔직히 밝히고 무리한 연결은 하지 말 것. relevance가 none이면 빈 배열도 가능.",
+        },
+      },
+      required: ["relevance", "notes"],
+      additionalProperties: false,
     },
     sections: {
       type: "array",
-      description: "원문의 흐름을 따라 구조화한 충실한 한글 정리 (요약이 아니라 원문 의도를 살린 번역·정리)",
+      description: "원문 흐름을 따라 구조화한 충실한 한글 정리 (요약이 아니라 원문 의도를 살린 번역·정리)",
       items: {
         type: "object",
         properties: {
@@ -51,19 +72,31 @@ const SCHEMA = {
       },
     },
   },
-  required: ["koreanTitle", "originalTitle", "oneLiner", "topic", "marketerInsight", "sections", "keyTerms"],
+  required: [
+    "koreanTitle", "originalTitle", "publishedDate", "oneLiner", "topic",
+    "keyTakeaways", "marketerAngle", "sections", "keyTerms",
+  ],
   additionalProperties: false,
 };
 
 const SYSTEM = `너는 영어 장문 자료를 한국어로 옮겨 주는 전문 에디터다.
-독자는 SK하이닉스의 반도체 마케터이며, AI 산업 동향에 관심이 많다.
+독자는 SK하이닉스의 반도체 마케터이며, AI 산업 동향에 관심이 많다. 단, 이 페르소나는 "기본 렌즈"일 뿐이다.
 
-원칙:
+번역·정리 원칙:
 - 번역은 원문의 의도와 뉘앙스에 충실하게, 맥락 손실을 최소화한다. 임의로 줄이거나 왜곡하지 않는다.
 - sections는 "요약"이 아니라 원문 흐름을 따라간 충실한 한글 정리다. 중요한 논지·근거·숫자·사례를 빠뜨리지 않는다.
 - oneLiner와 topic은 글의 본질을 증류해 한눈에 파악하게 한다.
-- marketerInsight는 독자 페르소나(반도체/AI 마케터) 관점에서 "왜 읽을 가치가 있는지, 우리 산업·마케팅에 어떤 함의가 있는지"를 짚는다. 원문에 없는 사실을 지어내지 말고, 원문 내용에 근거해 연결한다.
-- 전문 용어는 자연스러운 한국어로 옮기되, 필요하면 영문 원어를 괄호로 병기한다.
+- 원문에 없는 사실·숫자·고유명사를 절대 지어내지 않는다. 확실하지 않으면 적지 않는다.
+
+인사이트 원칙 (중요):
+- keyTakeaways: 글 자체의 보편적 핵심 시사점. 원문 내용에 근거한 사실 기반 통찰이다.
+- marketerAngle: 반도체/AI 마케팅 관점의 연결은 "진짜 연관이 있을 때만" 한다.
+  · 글이 반도체·AI와 직접 관련되면 relevance를 high/medium으로 두고 구체적으로 연결한다.
+  · 관련이 약하거나 없으면 relevance를 low/none으로 솔직히 표시하고, notes에 "이 글은 반도체와 직접 연관은 약하다"는 점을 밝힌다. 억지로 반도체/HBM/칩 수요 같은 것에 끼워 맞추지 마라.
+  · notes는 "모델의 해석"이다. 원문 사실로 단정하지 말 것.
+  · 독자(또는 SK하이닉스)의 구체적 상황(예: "우리 고객사", 특정 거래처)을 지어내 단정하지 마라. 일반화된 제안형으로 표현한다.
+
+- 전문 용어는 자연스러운 한국어로 옮기되 필요하면 영문 원어를 괄호로 병기한다.
 - 모든 출력은 한국어로 작성한다(originalTitle 제외).`;
 
 /**
