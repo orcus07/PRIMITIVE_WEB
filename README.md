@@ -40,6 +40,10 @@ cp .env.example .env      # ANTHROPIC_API_KEY 입력
 npm start                 # http://localhost:3000
 ```
 
+## 클라우드 배포 (폰·PC 어디서나 쓰기)
+
+노트북을 켜둘 필요 없이 항상 떠 있는 주소를 만들려면 → [`DEPLOY.md`](DEPLOY.md) (Render 무료 배포, 클릭 위주 안내).
+
 ## 사용법
 
 1. 상단에 영문 아티클 링크를 붙여넣고 **증류**(또는 Enter)
