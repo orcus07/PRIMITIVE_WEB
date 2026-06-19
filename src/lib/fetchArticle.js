@@ -57,21 +57,65 @@ async function tryProxy(url) {
  * URL에서 { title, text, via }를 반환. 모든 전략 실패 시 에러를 던진다.
  * @param {string} url
  */
+// ── X(트위터) 전용 수집 ──────────────────────────────────────────
+// 트윗은 로그인·JS·봇차단으로 일반 fetch가 막힌다. 텍스트만 주는 공개 API로 우회.
+const TWEET_RE = /(?:twitter\.com|x\.com)\/([^/?#]+)\/status\/(\d+)/i;
+const isTweet = (url) => TWEET_RE.test(url);
+
+// 1순위: fxtwitter 공개 API (깔끔한 JSON, 인용 트윗까지)
+async function tryTweetFx(url) {
+  const id = url.match(TWEET_RE)[2];
+  const res = await fetch(`https://api.fxtwitter.com/status/${id}`, { headers: BROWSER_HEADERS });
+  if (!res.ok) throw new Error(`tweet-fx ${res.status}`);
+  const data = await res.json();
+  const t = data && data.tweet;
+  if (!t || !t.text) throw new Error("tweet-fx empty");
+  let text = t.text;
+  if (t.quote && t.quote.text) {
+    text += `\n\n[인용한 트윗 - @${(t.quote.author && t.quote.author.screen_name) || ""}]\n${t.quote.text}`;
+  }
+  const handle = (t.author && t.author.screen_name) || url.match(TWEET_RE)[1];
+  const name = (t.author && t.author.name) || handle;
+  return { title: `${name} (@${handle}) 트윗`, text, via: "tweet" };
+}
+
+// 2순위: 공식 oEmbed (첫 트윗 텍스트)
+async function tryTweetOembed(url) {
+  const api = `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&omit_script=true&dnt=true`;
+  const res = await fetch(api, { headers: BROWSER_HEADERS });
+  if (!res.ok) throw new Error(`tweet-oembed ${res.status}`);
+  const data = await res.json();
+  if (!data || !data.html) throw new Error("tweet-oembed empty");
+  const text = parse(data.html).text.replace(/\s+/g, " ").trim();
+  if (!text) throw new Error("tweet-oembed no text");
+  return { title: data.author_name ? `${data.author_name} 트윗` : "트윗", text, via: "tweet" };
+}
+
+/**
+ * URL에서 { title, text, via }를 반환. 모든 전략 실패 시 에러를 던진다.
+ * @param {string} url
+ */
 export async function fetchArticle(url) {
   if (!/^https?:\/\//i.test(url)) {
     throw new Error("올바른 http(s) 링크를 입력해주세요.");
   }
 
+  // 트윗이면 트윗 전용 전략을 먼저 시도한다.
+  const strategies = isTweet(url)
+    ? [tryTweetFx, tryTweetOembed, tryProxy]
+    : [tryDirect, tryProxy];
+
   const errors = [];
-  for (const strategy of [tryDirect, tryProxy]) {
+  for (const strategy of strategies) {
     try {
       return await strategy(url);
     } catch (e) {
       errors.push(e.message);
     }
   }
-  throw new Error(
-    `이 링크의 본문을 가져오지 못했습니다 (${errors.join(", ")}). ` +
-      `봇 차단이 강한 사이트일 수 있어요. 원문 본문을 복사해서 "본문 붙여넣기"로 넣어주세요.`
-  );
+
+  const hint = isTweet(url)
+    ? `긴 스레드는 첫 트윗만 받아오거나 막힐 수 있어요. 트윗 본문을 복사해 "본문 붙여넣기"로 넣어주세요.`
+    : `봇 차단이 강한 사이트일 수 있어요. 원문 본문을 복사해서 "본문 붙여넣기"로 넣어주세요.`;
+  throw new Error(`이 링크의 본문을 가져오지 못했습니다 (${errors.join(", ")}). ${hint}`);
 }
