@@ -2,15 +2,75 @@
 // 독자 페르소나(반도체 마케터·AI 동향 관심)는 "기본 렌즈"로 쓰되,
 // 무관한 글까지 억지로 반도체와 연결하지 않도록 — 연관도를 정직하게 표시한다.
 import Anthropic from "@anthropic-ai/sdk";
+import https from "node:https";
+import { Readable } from "node:stream";
 
 const MODEL = "claude-opus-4-8";
+
+// node:https 기반 custom fetch — Render에서 native fetch(undici)가 Anthropic 연결을
+// 도중에 끊는("Premature close") 문제를 우회한다. (응답을 끝까지 받아 버퍼로 반환)
+function httpsFetch(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const rawBody = options.body;
+    const bodyBuf = rawBody == null ? null
+                  : rawBody instanceof Uint8Array ? rawBody
+                  : Buffer.from(rawBody);
+
+    const headers = { ...(options.headers || {}) };
+    if (bodyBuf) headers["content-length"] = bodyBuf.length;
+
+    const req = https.request(
+      { hostname: u.hostname, path: u.pathname + u.search, method: options.method || "GET", headers },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          const buf = Buffer.concat(chunks);
+          const text = buf.toString("utf-8");
+          const h = res.headers;
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            statusText: res.statusMessage || "",
+            url,
+            redirected: false,
+            type: "basic",
+            bodyUsed: false,
+            headers: {
+              get: (n) => { const v = h[n.toLowerCase()]; return Array.isArray(v) ? v.join(", ") : (v ?? null); },
+              has: (n) => n.toLowerCase() in h,
+              entries: () => Object.entries(h),
+              forEach: (cb) => Object.entries(h).forEach(([k, v]) => cb(String(v), k)),
+            },
+            body: Readable.toWeb ? Readable.toWeb(Readable.from([buf])) : null,
+            clone() { return this; },
+            json: () => Promise.resolve(JSON.parse(text)),
+            text: () => Promise.resolve(text),
+            arrayBuffer: () => Promise.resolve(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)),
+            blob: () => Promise.resolve(new Blob([buf])),
+            formData: () => Promise.reject(new Error("formData not supported")),
+          });
+        });
+        res.on("error", reject);
+      }
+    );
+    req.on("error", reject);
+    if (options.signal) {
+      if (options.signal.aborted) { req.destroy(); return; }
+      options.signal.addEventListener("abort", () => req.destroy(), { once: true });
+    }
+    if (bodyBuf) req.write(bodyBuf);
+    req.end();
+  });
+}
 
 let _client;
 function client() {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY 가 설정되지 않았습니다. .env 파일을 확인해주세요.");
   }
-  return (_client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }));
+  return (_client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, fetch: httpsFetch }));
 }
 
 const SCHEMA = {
