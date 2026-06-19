@@ -108,7 +108,7 @@ export async function distillArticle(text, { url = "", sourceTitle = "" } = {}) 
     .filter(Boolean)
     .join("\n");
 
-  const message = await client().messages.create({
+  const params = {
     model: MODEL,
     max_tokens: 16000,
     system: SYSTEM,
@@ -120,9 +120,23 @@ export async function distillArticle(text, { url = "", sourceTitle = "" } = {}) 
         content: `${header}\n\n아래 영어 본문을 위 원칙에 따라 한글로 번역·구조화·증류해줘.\n\n---\n${text}`,
       },
     ],
-  });
+  };
 
-  const block = message.content.find((b) => b.type === "text");
-  if (!block) throw new Error("Claude 응답에서 결과를 찾지 못했습니다.");
-  return JSON.parse(block.text);
+  // Render↔Anthropic 간헐적 연결 끊김("Premature close") 대비:
+  // 스트리밍으로 받아 연결을 유지하고, 실패하면 최대 3회 재시도한다.
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const stream = client().messages.stream(params);
+      const message = await stream.finalMessage();
+      const block = message.content.find((b) => b.type === "text");
+      if (!block) throw new Error("Claude 응답에서 결과를 찾지 못했습니다.");
+      return JSON.parse(block.text);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt)); // 3s, 6s
+    }
+  }
+  throw lastErr;
 }
+
