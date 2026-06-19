@@ -109,7 +109,7 @@
   }
 
   function viaLabel(v) {
-    return { direct: "직접 수집", proxy: "프록시 우회", paste: "붙여넣기" }[v] || "";
+    return { direct: "직접 수집", proxy: "프록시 우회", tweet: "트윗", paste: "붙여넣기" }[v] || "";
   }
   function fillList(id, items) {
     const ul = $(id); ul.innerHTML = "";
