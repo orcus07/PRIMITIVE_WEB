@@ -54,11 +54,14 @@
     busy(true);
     try {
       const result = await postJson("/api/digest-text", {
-        text, title: $("paste-title").value.trim(),
+        text,
+        title: $("paste-title").value.trim(),
+        url: $("paste-url").value.trim(),
       });
       saveAndShow(result);
       $("paste-text").value = "";
       $("paste-title").value = "";
+      $("paste-url").value = "";
       $("paste-box").classList.add("hidden");
     } catch (err) {
       alert(err.message);
