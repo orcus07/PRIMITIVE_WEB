@@ -135,7 +135,10 @@ async function fetchTweet(url) {
   }
   tweet.url = url; // 기본: 원문 열기 = 트윗 URL
 
-  const urls = tweet.text.match(/https?:\/\/[^\s]+/g) || [];
+  // URL 뒤에 공백 없이 붙은 꼬리 문자(엠대시·따옴표·괄호·구두점 등)를 떼어낸다.
+  // 예: "https://t.co/abc—" → "https://t.co/abc"
+  const cleanUrl = (u) => u.replace(/[‐-―‘-‟….,;:!?'"()[\]{}<>]+$/u, "");
+  const urls = (tweet.text.match(/https?:\/\/[^\s]+/g) || []).map(cleanUrl);
   const textNoUrls = tweet.text.replace(/https?:\/\/[^\s]+/g, "").replace(/\s+/g, " ").trim();
 
   // 텍스트가 짧고 링크가 있으면 = 링크 공유 트윗 → 그 링크 본문을 읽는다.
