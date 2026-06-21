@@ -24,9 +24,10 @@ app.post("/api/digest", async (req, res) => {
   const { url } = req.body || {};
   if (!url) return res.status(400).json({ error: "링크가 없습니다." });
   try {
-    const { title, text, via } = await fetchArticle(url.trim());
-    const result = await distillArticle(text, { url, sourceTitle: title });
-    res.json({ url, via, ...result });
+    const fetched = await fetchArticle(url.trim());
+    const srcUrl = fetched.url || url; // 트윗 공유 링크면 실제 목적지 URL
+    const result = await distillArticle(fetched.text, { url: srcUrl, sourceTitle: fetched.title });
+    res.json({ url: srcUrl, via: fetched.via, ...result });
   } catch (err) {
     res.status(502).json({ error: err.message || "처리 중 오류가 발생했습니다." });
   }

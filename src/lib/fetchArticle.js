@@ -36,7 +36,7 @@ async function tryDirect(url) {
   if (!res.ok) throw new Error(`direct ${res.status}`);
   const html = await res.text();
   const { title, text } = htmlToText(html);
-  if (text.length < 400) throw new Error("direct too short");
+  if (text.length < 250) throw new Error("direct too short");
   return { title, text, via: "direct" };
 }
 
@@ -47,7 +47,7 @@ async function tryProxy(url) {
   });
   if (!res.ok) throw new Error(`proxy ${res.status}`);
   const text = (await res.text()).trim();
-  if (text.length < 400) throw new Error("proxy too short");
+  if (text.length < 250) throw new Error("proxy too short");
   // 프록시 응답 첫 줄이 "Title:" 형태인 경우가 많아 분리해 둔다.
   const m = text.match(/^Title:\s*(.+)$/m);
   return { title: m ? m[1].trim() : "", text, via: "proxy" };
@@ -102,9 +102,9 @@ async function resolveUrl(shortUrl) {
   }
 }
 
-// 일반 기사 수집(직접→프록시). 실패하면 null.
+// 일반 기사 수집(프록시 먼저 — JS/차단 사이트에 강함, 그다음 직접). 실패하면 null.
 async function fetchLinkedArticle(u) {
-  for (const s of [tryDirect, tryProxy]) {
+  for (const s of [tryProxy, tryDirect]) {
     try {
       return await s(u);
     } catch {
@@ -127,7 +127,13 @@ async function fetchTweet(url) {
       errors.push(e.message);
     }
   }
-  if (!tweet) throw new Error(errors.join(", "));
+  if (!tweet) {
+    throw new Error(
+      `트윗을 가져오지 못했어요 (${errors.join(", ")}). 보호된/삭제된 트윗이거나 일시적 차단일 수 있어요. ` +
+        `트윗 본문을 복사해 "본문 붙여넣기"로 넣어주세요.`
+    );
+  }
+  tweet.url = url; // 기본: 원문 열기 = 트윗 URL
 
   const urls = tweet.text.match(/https?:\/\/[^\s]+/g) || [];
   const textNoUrls = tweet.text.replace(/https?:\/\/[^\s]+/g, "").replace(/\s+/g, " ").trim();
@@ -136,15 +142,22 @@ async function fetchTweet(url) {
   if (urls.length && textNoUrls.length < 200) {
     const shared = await resolveUrl(urls[urls.length - 1]);
     if (!isTweet(shared) && /^https?:\/\//i.test(shared)) {
+      const who = tweet.handle || "트윗";
       const art = await fetchLinkedArticle(shared);
       if (art && art.text) {
-        const who = tweet.handle || "트윗";
         return {
           title: art.title || tweet.title,
           text: `[${who} 가 공유한 링크: ${shared}]\n\n${art.text}`,
           via: "tweet",
+          url: shared, // 원문 열기 = 실제 목적지 글
         };
       }
+      // 본문 자동 수집 실패: 적어도 펼친 목적지 URL을 안내해 바로 붙여넣게 한다.
+      throw new Error(
+        `이 트윗은 링크 공유 트윗이에요. 공유된 글의 본문을 자동으로 못 가져왔어요.\n` +
+          `→ 공유된 실제 글: ${shared}\n` +
+          `이 링크를 열어 본문을 복사한 뒤 "본문 붙여넣기"(원문 링크 칸에 위 주소)로 넣으면 정확히 정리해드려요.`
+      );
     }
   }
   return tweet;
@@ -159,22 +172,16 @@ export async function fetchArticle(url) {
     throw new Error("올바른 http(s) 링크를 입력해주세요.");
   }
 
-  // 트윗이면 트윗 전용 처리(필요 시 공유 링크 추적).
+  // 트윗이면 트윗 전용 처리(필요 시 공유 링크 추적). fetchTweet이 안내 메시지를 던진다.
   if (isTweet(url)) {
-    try {
-      return await fetchTweet(url);
-    } catch (e) {
-      throw new Error(
-        `트윗 본문을 가져오지 못했습니다 (${e.message}). ` +
-          `긴 스레드/보호된 트윗이거나 공유 링크가 막혔을 수 있어요. 본문을 복사해 "본문 붙여넣기"로 넣어주세요.`
-      );
-    }
+    return await fetchTweet(url);
   }
 
   const errors = [];
   for (const strategy of [tryDirect, tryProxy]) {
     try {
-      return await strategy(url);
+      const r = await strategy(url);
+      return { ...r, url }; // 원문 열기용 URL 동봉
     } catch (e) {
       errors.push(e.message);
     }
