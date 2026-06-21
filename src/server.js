@@ -13,7 +13,18 @@ const ROOT = path.join(__dirname, "..");
 
 const app = express();
 app.use(express.json({ limit: "30mb" })); // PDF base64 수용
-app.use(express.static(path.join(ROOT, "public")));
+
+// HTML은 절대 캐시하지 않는다(브라우저가 옛 index.html을 붙들고 ?v= 자산을
+// 영영 못 받는 문제 방지). 나머지 정적 자산은 ?v= 쿼리로 캐시를 무력화한다.
+app.use(
+  express.static(path.join(ROOT, "public"), {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".html")) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      }
+    },
+  })
+);
 
 app.get("/api/health", (_req, res) => {
   res.json({ anthropic: Boolean(process.env.ANTHROPIC_API_KEY) });
