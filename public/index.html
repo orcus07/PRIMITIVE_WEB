@@ -28,6 +28,7 @@
       </div>
       <div class="sub-row">
         <button id="toggle-paste" class="link-btn">링크가 막히면 → 본문 직접 붙여넣기</button>
+        <button id="toggle-pdf" class="link-btn">📄 PDF 올리기</button>
         <span id="status" class="status"></span>
       </div>
 
@@ -37,6 +38,13 @@
         <input id="paste-title" type="text" placeholder="(선택) 제목" />
         <textarea id="paste-text" rows="6" placeholder="여기에 영문 본문을 붙여넣으세요"></textarea>
         <button id="paste-run" class="btn btn-primary">붙여넣은 본문 증류</button>
+      </div>
+
+      <!-- PDF 올리기(접힘) -->
+      <div id="pdf-box" class="paste-box hidden">
+        <p class="hint">PDF 논문·보고서를 올리면 Claude가 직접 읽어 정리해요. (최대 ~20MB / 100쪽)</p>
+        <input id="pdf-file" type="file" accept="application/pdf,.pdf" />
+        <button id="pdf-run" class="btn btn-primary">PDF 증류</button>
       </div>
 
       <!-- 결과 -->
