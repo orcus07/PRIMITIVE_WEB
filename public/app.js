@@ -68,6 +68,35 @@
     } finally { busy(false); }
   }
 
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const res = String(reader.result); // data:application/pdf;base64,XXXX
+        const comma = res.indexOf(",");
+        resolve(comma >= 0 ? res.slice(comma + 1) : res);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function digestPdf() {
+    const file = $("pdf-file").files && $("pdf-file").files[0];
+    if (!file) return alert("PDF 파일을 선택하세요.");
+    if (file.size > 22 * 1024 * 1024) return alert("PDF가 너무 큽니다. ~20MB 이하로 올려주세요.");
+    busy(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const result = await postJson("/api/digest-pdf", { base64, filename: file.name });
+      saveAndShow(result);
+      $("pdf-file").value = "";
+      $("pdf-box").classList.add("hidden");
+    } catch (err) {
+      alert(err.message);
+    } finally { busy(false); }
+  }
+
   async function postJson(endpoint, body) {
     const res = await fetch(endpoint, {
       method: "POST",
@@ -112,7 +141,7 @@
   }
 
   function viaLabel(v) {
-    return { direct: "직접 수집", proxy: "프록시 우회", tweet: "트윗", paste: "붙여넣기" }[v] || "";
+    return { direct: "직접 수집", proxy: "프록시 우회", tweet: "트윗", pdf: "PDF", paste: "붙여넣기" }[v] || "";
   }
   function fillList(id, items) {
     const ul = $(id); ul.innerHTML = "";
@@ -218,6 +247,9 @@
   $("paste-run").addEventListener("click", digestPaste);
   $("toggle-paste").addEventListener("click", () =>
     $("paste-box").classList.toggle("hidden"));
+  $("pdf-run").addEventListener("click", digestPdf);
+  $("toggle-pdf").addEventListener("click", () =>
+    $("pdf-box").classList.toggle("hidden"));
   $("delete-btn").addEventListener("click", removeCurrent);
   $("search").addEventListener("input", renderList);
 

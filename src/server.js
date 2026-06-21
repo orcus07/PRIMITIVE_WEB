@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 
 import { fetchArticle } from "./lib/fetchArticle.js";
-import { distillArticle } from "./lib/distill.js";
+import { distillArticle, distillPdf } from "./lib/distill.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 
 const app = express();
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "30mb" })); // PDF base64 수용
 app.use(express.static(path.join(ROOT, "public")));
 
 app.get("/api/health", (_req, res) => {
@@ -42,6 +42,20 @@ app.post("/api/digest-text", async (req, res) => {
   try {
     const result = await distillArticle(text.trim(), { url, sourceTitle: title });
     res.json({ url, via: "paste", ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "처리 중 오류가 발생했습니다." });
+  }
+});
+
+// PDF 업로드(base64) → Claude가 직접 읽어 정리
+app.post("/api/digest-pdf", async (req, res) => {
+  const { base64, filename = "문서.pdf", url = "" } = req.body || {};
+  if (!base64 || base64.length < 100) {
+    return res.status(400).json({ error: "PDF 데이터가 비어 있습니다." });
+  }
+  try {
+    const result = await distillPdf(base64, { filename });
+    res.json({ url, via: "pdf", ...result });
   } catch (err) {
     res.status(500).json({ error: err.message || "처리 중 오류가 발생했습니다." });
   }

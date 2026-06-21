@@ -163,27 +163,18 @@ const SYSTEM = `너는 영어 장문 자료를 한국어로 옮겨 주는 전문
  * @param {string} text - 원문 본문
  * @param {{url?: string, sourceTitle?: string}} [meta]
  */
-export async function distillArticle(text, { url = "", sourceTitle = "" } = {}) {
-  const header = [sourceTitle && `원문 제목: ${sourceTitle}`, url && `출처: ${url}`]
-    .filter(Boolean)
-    .join("\n");
-
+// Render↔Anthropic 간헐적 연결 끊김("Premature close") 대비:
+// 스트리밍으로 받아 연결을 유지하고, 실패하면 최대 3회 재시도한다.
+async function runStructured(messages) {
   const params = {
     model: MODEL,
     max_tokens: 16000,
     system: SYSTEM,
     thinking: { type: "adaptive" },
     output_config: { format: { type: "json_schema", schema: SCHEMA } },
-    messages: [
-      {
-        role: "user",
-        content: `${header}\n\n아래 영어 본문을 위 원칙에 따라 한글로 번역·구조화·증류해줘.\n\n---\n${text}`,
-      },
-    ],
+    messages,
   };
 
-  // Render↔Anthropic 간헐적 연결 끊김("Premature close") 대비:
-  // 스트리밍으로 받아 연결을 유지하고, 실패하면 최대 3회 재시도한다.
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -199,4 +190,38 @@ export async function distillArticle(text, { url = "", sourceTitle = "" } = {}) 
   }
   throw lastErr;
 }
+
+export async function distillArticle(text, { url = "", sourceTitle = "" } = {}) {
+  const header = [sourceTitle && `원문 제목: ${sourceTitle}`, url && `출처: ${url}`]
+    .filter(Boolean)
+    .join("\n");
+
+  return runStructured([
+    {
+      role: "user",
+      content: `${header}\n\n아래 영어 본문을 위 원칙에 따라 한글로 번역·구조화·증류해줘.\n\n---\n${text}`,
+    },
+  ]);
+}
+
+// PDF(논문·보고서 등)를 Claude가 직접 읽어 정리한다.
+export async function distillPdf(base64, { filename = "문서" } = {}) {
+  return runStructured([
+    {
+      role: "user",
+      content: [
+        {
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data: base64 },
+          title: filename,
+        },
+        {
+          type: "text",
+          text: `이 PDF 문서("${filename}")를 위 원칙에 따라 한글로 번역·구조화·증류해줘.`,
+        },
+      ],
+    },
+  ]);
+}
+
 
