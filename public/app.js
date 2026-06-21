@@ -32,7 +32,63 @@
   function busy(on) {
     $("run-btn").disabled = on;
     $("paste-run").disabled = on;
-    setStatus(on ? "증류 중… (번역·구조화는 시간이 좀 걸려요)" : "");
+    $("pdf-run").disabled = on;
+    if (on) startProgress();
+    else setStatus("");
+  }
+
+  /* ---------- 진행 로그 ---------- */
+  let progStart = 0;
+  function startProgress() {
+    progStart = Date.now();
+    const log = $("progress-log");
+    log.innerHTML = "";
+    log.classList.remove("hidden");
+    setStatus("시작…");
+  }
+  function logStep(msg) {
+    const log = $("progress-log");
+    log.classList.remove("hidden");
+    const t = ((Date.now() - progStart) / 1000).toFixed(1);
+    const li = document.createElement("li");
+    li.textContent = `+${t}s  ${msg}`;
+    log.appendChild(li);
+    log.scrollTop = log.scrollHeight;
+    setStatus(msg);
+  }
+
+  // NDJSON 스트림을 읽으며 진행 단계를 logStep으로 표시하고 최종 결과를 반환.
+  async function postStream(endpoint, body) {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.body) { // 스트림 미지원/즉시 에러
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `오류 (${res.status})`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "", result = null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let evt;
+        try { evt = JSON.parse(line); } catch { continue; }
+        if (evt.type === "step") logStep(evt.msg);
+        else if (evt.type === "error") throw new Error(evt.error);
+        else if (evt.type === "result") result = evt.data;
+      }
+    }
+    if (!result) throw new Error("결과를 받지 못했습니다. (연결이 끊겼을 수 있어요)");
+    return result;
   }
 
   async function digestUrl() {
@@ -40,10 +96,12 @@
     if (!url) return alert("링크를 입력하세요.");
     busy(true);
     try {
-      const result = await postJson("/api/digest", { url });
+      const result = await postStream("/api/digest", { url });
+      logStep("🎉 완료");
       saveAndShow(result);
       $("url").value = "";
     } catch (err) {
+      logStep("❌ " + err.message);
       alert(err.message);
     } finally { busy(false); }
   }
@@ -53,17 +111,19 @@
     if (text.length < 100) return alert("본문을 100자 이상 붙여넣어 주세요.");
     busy(true);
     try {
-      const result = await postJson("/api/digest-text", {
+      const result = await postStream("/api/digest-text", {
         text,
         title: $("paste-title").value.trim(),
         url: $("paste-url").value.trim(),
       });
+      logStep("🎉 완료");
       saveAndShow(result);
       $("paste-text").value = "";
       $("paste-title").value = "";
       $("paste-url").value = "";
       $("paste-box").classList.add("hidden");
     } catch (err) {
+      logStep("❌ " + err.message);
       alert(err.message);
     } finally { busy(false); }
   }
@@ -87,12 +147,15 @@
     if (file.size > 22 * 1024 * 1024) return alert("PDF가 너무 큽니다. ~20MB 이하로 올려주세요.");
     busy(true);
     try {
+      logStep(`PDF 읽는 중: ${file.name} (${(file.size / 1048576).toFixed(1)}MB)`);
       const base64 = await fileToBase64(file);
-      const result = await postJson("/api/digest-pdf", { base64, filename: file.name });
+      const result = await postStream("/api/digest-pdf", { base64, filename: file.name });
+      logStep("🎉 완료");
       saveAndShow(result);
       $("pdf-file").value = "";
       $("pdf-box").classList.add("hidden");
     } catch (err) {
+      logStep("❌ " + err.message);
       alert(err.message);
     } finally { busy(false); }
   }
