@@ -88,6 +88,10 @@
       }
     }
     if (!result) throw new Error("결과를 받지 못했습니다. (연결이 끊겼을 수 있어요)");
+    // 빈/깨진 결과(예: 캐시된 옛 코드가 스트림을 잘못 해석한 경우) 저장 방지
+    const ok = result.koreanTitle || result.originalTitle ||
+      (result.sections && result.sections.length);
+    if (!ok) throw new Error("결과가 비어 있어요. 페이지를 새로고침(캐시 비우기) 후 다시 시도해주세요.");
     return result;
   }
 
