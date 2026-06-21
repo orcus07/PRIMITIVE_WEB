@@ -13,6 +13,28 @@ const BROWSER_HEADERS = {
 
 const PROXY = process.env.READER_PROXY || "https://r.jina.ai/";
 
+// 전략 함수 이름 → 사람이 읽을 한글 라벨 (진행 로그용)
+const LABEL = {
+  tryDirect: "직접 수집",
+  tryProxy: "프록시(Jina) 우회",
+  tryTweetFx: "fxtwitter API",
+  tryTweetOembed: "트위터 oEmbed",
+};
+const labelOf = (fn) => LABEL[fn.name] || fn.name;
+
+// X(트위터)가 로그인/가입을 요구하며 내놓는 장벽 페이지인지 판별.
+// 프록시가 트윗 대신 이 화면을 긁어오면 "가짜 본문"이 되므로 걸러낸다.
+function looksLikeXLoginWall(text) {
+  const t = text.slice(0, 2000).toLowerCase();
+  const marks = [
+    "log in", "sign up", "don't miss what's happening",
+    "see new posts", "something went wrong", "try reloading",
+    "javascript is not available",
+  ];
+  const hits = marks.filter((s) => t.includes(s)).length;
+  return hits >= 2;
+}
+
 // HTML에서 잡음(script/style/nav 등)을 걷어내고 제목 + 본문 텍스트만 남긴다.
 function htmlToText(html) {
   const root = parse(html, { blockTextElements: { script: false, style: false } });
@@ -103,12 +125,15 @@ async function resolveUrl(shortUrl) {
 }
 
 // 일반 기사 수집(프록시 먼저 — JS/차단 사이트에 강함, 그다음 직접). 실패하면 null.
-async function fetchLinkedArticle(u) {
+async function fetchLinkedArticle(u, onProgress = () => {}) {
   for (const s of [tryProxy, tryDirect]) {
+    onProgress(`공유 링크 본문 ${labelOf(s)} 시도…`);
     try {
-      return await s(u);
-    } catch {
-      /* 다음 전략 */
+      const r = await s(u);
+      onProgress(`✓ 공유 링크 본문 확보 (${r.text.length.toLocaleString()}자)`);
+      return r;
+    } catch (e) {
+      onProgress(`✗ ${labelOf(s)} 실패: ${e.message}`);
     }
   }
   return null;
@@ -116,15 +141,23 @@ async function fetchLinkedArticle(u) {
 
 // 트윗을 가져오되, 본문이 거의 없고 링크만 공유한 트윗이면
 // 그 링크를 따라가 실제 글 본문을 읽어온다.
-async function fetchTweet(url) {
+async function fetchTweet(url, onProgress = () => {}) {
   const errors = [];
   let tweet;
   for (const s of [tryTweetFx, tryTweetOembed, tryProxy]) {
+    onProgress(`트윗 ${labelOf(s)} 시도…`);
     try {
-      tweet = await s(url);
+      const r = await s(url);
+      // 프록시가 트윗 대신 X 로그인 장벽을 긁어왔다면 가짜 본문이므로 거부.
+      if (s === tryProxy && looksLikeXLoginWall(r.text)) {
+        throw new Error("X 로그인 장벽 페이지만 수집됨");
+      }
+      tweet = r;
+      onProgress(`✓ ${labelOf(s)} 성공`);
       break;
     } catch (e) {
-      errors.push(e.message);
+      errors.push(`${labelOf(s)}: ${e.message}`);
+      onProgress(`✗ ${labelOf(s)} 실패: ${e.message}`);
     }
   }
   if (!tweet) {
@@ -143,10 +176,12 @@ async function fetchTweet(url) {
 
   // 텍스트가 짧고 링크가 있으면 = 링크 공유 트윗 → 그 링크 본문을 읽는다.
   if (urls.length && textNoUrls.length < 200) {
+    onProgress(`링크 공유 트윗 감지 — 단축 링크 펼치는 중…`);
     const shared = await resolveUrl(urls[urls.length - 1]);
     if (!isTweet(shared) && /^https?:\/\//i.test(shared)) {
+      onProgress(`공유 링크 목적지: ${shared}`);
       const who = tweet.handle || "트윗";
-      const art = await fetchLinkedArticle(shared);
+      const art = await fetchLinkedArticle(shared, onProgress);
       if (art && art.text) {
         return {
           title: art.title || tweet.title,
@@ -170,23 +205,27 @@ async function fetchTweet(url) {
  * URL에서 { title, text, via }를 반환. 모든 전략 실패 시 에러를 던진다.
  * @param {string} url
  */
-export async function fetchArticle(url) {
+export async function fetchArticle(url, onProgress = () => {}) {
   if (!/^https?:\/\//i.test(url)) {
     throw new Error("올바른 http(s) 링크를 입력해주세요.");
   }
 
   // 트윗이면 트윗 전용 처리(필요 시 공유 링크 추적). fetchTweet이 안내 메시지를 던진다.
   if (isTweet(url)) {
-    return await fetchTweet(url);
+    onProgress("X(트위터) 링크 감지 — 트윗 전용 수집 시작");
+    return await fetchTweet(url, onProgress);
   }
 
   const errors = [];
   for (const strategy of [tryDirect, tryProxy]) {
+    onProgress(`${labelOf(strategy)} 시도…`);
     try {
       const r = await strategy(url);
+      onProgress(`✓ ${labelOf(strategy)} 성공 (${r.text.length.toLocaleString()}자)`);
       return { ...r, url }; // 원문 열기용 URL 동봉
     } catch (e) {
       errors.push(e.message);
+      onProgress(`✗ ${labelOf(strategy)} 실패: ${e.message}`);
     }
   }
   throw new Error(

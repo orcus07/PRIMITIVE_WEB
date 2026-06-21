@@ -165,7 +165,7 @@ const SYSTEM = `너는 영어 장문 자료를 한국어로 옮겨 주는 전문
  */
 // Render↔Anthropic 간헐적 연결 끊김("Premature close") 대비:
 // 스트리밍으로 받아 연결을 유지하고, 실패하면 최대 3회 재시도한다.
-async function runStructured(messages) {
+async function runStructured(messages, onProgress = () => {}) {
   const params = {
     model: MODEL,
     max_tokens: 16000,
@@ -178,20 +178,23 @@ async function runStructured(messages) {
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
+      onProgress(attempt === 1 ? "Claude 증류 중… (번역·구조화)" : `Claude 재시도 ${attempt}/3…`);
       const stream = client().messages.stream(params);
       const message = await stream.finalMessage();
       const block = message.content.find((b) => b.type === "text");
       if (!block) throw new Error("Claude 응답에서 결과를 찾지 못했습니다.");
+      onProgress("✓ 증류 완료");
       return JSON.parse(block.text);
     } catch (err) {
       lastErr = err;
+      onProgress(`✗ 증류 실패: ${err.message}`);
       if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt)); // 3s, 6s
     }
   }
   throw lastErr;
 }
 
-export async function distillArticle(text, { url = "", sourceTitle = "" } = {}) {
+export async function distillArticle(text, { url = "", sourceTitle = "", onProgress } = {}) {
   const header = [sourceTitle && `원문 제목: ${sourceTitle}`, url && `출처: ${url}`]
     .filter(Boolean)
     .join("\n");
@@ -201,11 +204,11 @@ export async function distillArticle(text, { url = "", sourceTitle = "" } = {}) 
       role: "user",
       content: `${header}\n\n아래 영어 본문을 위 원칙에 따라 한글로 번역·구조화·증류해줘.\n\n---\n${text}`,
     },
-  ]);
+  ], onProgress);
 }
 
 // PDF(논문·보고서 등)를 Claude가 직접 읽어 정리한다.
-export async function distillPdf(base64, { filename = "문서" } = {}) {
+export async function distillPdf(base64, { filename = "문서", onProgress } = {}) {
   return runStructured([
     {
       role: "user",
@@ -221,7 +224,7 @@ export async function distillPdf(base64, { filename = "문서" } = {}) {
         },
       ],
     },
-  ]);
+  ], onProgress);
 }
 
 

@@ -89,6 +89,19 @@ textarea { resize: vertical; }
 }
 .status { font-size: 13px; color: var(--muted); }
 
+/* 단계별 진행 로그 */
+.progress-log {
+  margin: 12px 0 0; padding: 12px 14px; list-style: none;
+  background: #0f172a; color: #cbd5e1; border-radius: 8px;
+  font-family: "SFMono-Regular", "Consolas", "Menlo", monospace;
+  font-size: 12.5px; line-height: 1.6;
+  max-height: 220px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-all;
+  counter-reset: none;
+}
+.progress-log li { margin: 0; padding: 1px 0; }
+.progress-log li:last-child { color: #fff; font-weight: 600; }
+
 .paste-box .hint { font-size: 13px; color: var(--muted); margin: 0; }
 .paste-box {
   margin-top: 12px; display: flex; flex-direction: column; gap: 8px;
