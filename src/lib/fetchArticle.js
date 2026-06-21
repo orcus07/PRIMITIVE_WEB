@@ -115,21 +115,34 @@ async function tryTweetOembed(url) {
 }
 
 // 단축 링크(t.co 등)를 최종 목적지 URL로 펼친다.
+// Location 헤더를 직접 따라가며 최대 5홉까지 펼친다(res.url에만 의존하지 않음).
 async function resolveUrl(shortUrl) {
-  try {
-    const res = await fetch(shortUrl, { headers: BROWSER_HEADERS, redirect: "follow" });
-    return res.url || shortUrl;
-  } catch {
-    return shortUrl;
+  let current = shortUrl;
+  for (let i = 0; i < 5; i++) {
+    try {
+      const res = await fetch(current, { headers: BROWSER_HEADERS, redirect: "manual" });
+      const loc = res.headers.get("location");
+      if (loc) { current = new URL(loc, current).href; continue; }
+      // 더 이상 리다이렉트 없음 → 최종 URL
+      return res.url && res.url !== "about:blank" ? res.url : current;
+    } catch {
+      return current;
+    }
   }
+  return current;
 }
 
 // 일반 기사 수집(프록시 먼저 — JS/차단 사이트에 강함, 그다음 직접). 실패하면 null.
+// 로그인 장벽(X 등) 페이지만 긁힌 경우는 가짜 본문이므로 실패로 처리한다.
 async function fetchLinkedArticle(u, onProgress = () => {}) {
   for (const s of [tryProxy, tryDirect]) {
     onProgress(`공유 링크 본문 ${labelOf(s)} 시도…`);
     try {
       const r = await s(u);
+      if (looksLikeXLoginWall(r.text)) {
+        onProgress(`✗ ${labelOf(s)}: 로그인 장벽 페이지만 수집됨(무시)`);
+        continue;
+      }
       onProgress(`✓ 공유 링크 본문 확보 (${r.text.length.toLocaleString()}자)`);
       return r;
     } catch (e) {
@@ -190,10 +203,24 @@ async function fetchTweet(url, onProgress = () => {}) {
           url: shared, // 원문 열기 = 실제 목적지 글
         };
       }
-      // 본문 자동 수집 실패: 적어도 펼친 목적지 URL을 안내해 바로 붙여넣게 한다.
+      // 공유 링크 본문 자동 수집 실패(로그인 장벽 등).
+      // 트윗 본인 코멘트가 의미 있게 있으면 그걸로 폴백(없는 내용 지어내지 않음).
+      if (textNoUrls.length >= 30) {
+        onProgress("✗ 공유 링크 본문 수집 실패 — 트윗 자체 코멘트로 폴백");
+        return {
+          title: tweet.title,
+          text:
+            `[참고: 이 트윗이 공유한 링크(${shared})의 본문은 로그인 장벽 등으로 ` +
+            `자동 수집하지 못했습니다. 아래는 트윗 자체 내용입니다.]\n\n${tweet.text}`,
+          via: "tweet",
+          url: shared, // 원문 열기 = 공유 링크
+        };
+      }
+      // 코멘트도 거의 없는 순수 링크 공유 → 정직하게 붙여넣기 안내.
       throw new Error(
-        `이 트윗은 링크 공유 트윗이에요. 공유된 글의 본문을 자동으로 못 가져왔어요.\n` +
-          `→ 공유된 실제 글: ${shared}\n` +
+        `이 트윗은 X(트위터) 안에서 로그인해야 보이는 콘텐츠를 공유한 것 같아요. ` +
+          `공유된 글의 본문을 자동으로 가져오지 못했습니다.\n` +
+          `→ 공유 링크: ${shared}\n` +
           `이 링크를 열어 본문을 복사한 뒤 "본문 붙여넣기"(원문 링크 칸에 위 주소)로 넣으면 정확히 정리해드려요.`
       );
     }
