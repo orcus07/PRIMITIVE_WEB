@@ -1,6 +1,6 @@
 // 영문 본문을 받아 한글로 번역·구조화·증류한다. (Claude claude-opus-4-8)
-// 독자 페르소나(반도체 마케터·AI 동향 관심)는 "기본 렌즈"로 쓰되,
-// 무관한 글까지 억지로 반도체와 연결하지 않도록 — 연관도를 정직하게 표시한다.
+// 독자 관점(렌즈)은 사용자가 주입할 수 있고, 비우면 기본값(반도체 마케터·AI 동향)을 쓴다.
+// 무관한 글까지 억지로 그 관점에 끼워 맞추지 않도록 — 연관도를 정직하게 표시한다.
 import Anthropic from "@anthropic-ai/sdk";
 import https from "node:https";
 import { Readable } from "node:stream";
@@ -88,18 +88,18 @@ const SCHEMA = {
     },
     marketerAngle: {
       type: "object",
-      description: "반도체 마케터(AI 동향 관심) 관점에서의 연관성. 억지로 연결하지 말 것.",
+      description: "설정된 독자 관점에서의 연관성. 억지로 연결하지 말 것.",
       properties: {
         relevance: {
           type: "string",
           enum: ["high", "medium", "low", "none"],
-          description: "이 글이 반도체·AI 마케팅과 실제로 얼마나 연관되는지 정직하게",
+          description: "이 글이 설정된 독자 관점과 실제로 얼마나 연관되는지 정직하게",
         },
         notes: {
           type: "array",
           items: { type: "string" },
           description:
-            "반도체 마케터 관점의 해석·시사점(모델의 해석임). 연관이 약하면 그렇다고 솔직히 밝히고 무리한 연결은 하지 말 것. relevance가 none이면 빈 배열도 가능.",
+            "설정된 독자 관점의 해석·시사점(모델의 해석임). 연관이 약하면 그렇다고 솔직히 밝히고 무리한 연결은 하지 말 것. relevance가 none이면 빈 배열도 가능.",
         },
       },
       required: ["relevance", "notes"],
@@ -139,8 +139,14 @@ const SCHEMA = {
   additionalProperties: false,
 };
 
-const SYSTEM = `너는 영어 장문 자료를 한국어로 옮겨 주는 전문 에디터다.
-독자는 SK하이닉스의 반도체 마케터이며, AI 산업 동향에 관심이 많다. 단, 이 페르소나는 "기본 렌즈"일 뿐이다.
+// 사용자가 비워두면 쓰는 기본 독자 관점.
+const DEFAULT_PERSPECTIVE = "SK하이닉스의 반도체 마케터이며, AI 산업 동향에 관심이 많다";
+
+// 독자 관점(렌즈)을 주입해 시스템 프롬프트를 만든다.
+function buildSystem(perspective) {
+  const lens = (perspective || "").trim() || DEFAULT_PERSPECTIVE;
+  return `너는 영어 장문 자료를 한국어로 옮겨 주는 전문 에디터다.
+독자는 다음 관점을 가진 사람이다 — ${lens}. 단, 이 관점은 "기본 렌즈"일 뿐이다.
 
 번역·정리 원칙:
 - 번역은 원문의 의도와 뉘앙스에 충실하게, 맥락 손실을 최소화한다. 임의로 줄이거나 왜곡하지 않는다.
@@ -150,14 +156,15 @@ const SYSTEM = `너는 영어 장문 자료를 한국어로 옮겨 주는 전문
 
 인사이트 원칙 (중요):
 - keyTakeaways: 글 자체의 보편적 핵심 시사점. 원문 내용에 근거한 사실 기반 통찰이다.
-- marketerAngle: 반도체/AI 마케팅 관점의 연결은 "진짜 연관이 있을 때만" 한다.
-  · 글이 반도체·AI와 직접 관련되면 relevance를 high/medium으로 두고 구체적으로 연결한다.
-  · 관련이 약하거나 없으면 relevance를 low/none으로 솔직히 표시하고, notes에 "이 글은 반도체와 직접 연관은 약하다"는 점을 밝힌다. 억지로 반도체/HBM/칩 수요 같은 것에 끼워 맞추지 마라.
+- marketerAngle: 위 독자 관점에서의 연결은 "진짜 연관이 있을 때만" 한다.
+  · 글이 그 관점과 직접 관련되면 relevance를 high/medium으로 두고 구체적으로 연결한다.
+  · 관련이 약하거나 없으면 relevance를 low/none으로 솔직히 표시하고, notes에 "이 글은 해당 관점과 직접 연관은 약하다"는 점을 밝힌다. 억지로 끼워 맞추지 마라.
   · notes는 "모델의 해석"이다. 원문 사실로 단정하지 말 것.
-  · 독자(또는 SK하이닉스)의 구체적 상황(예: "우리 고객사", 특정 거래처)을 지어내 단정하지 마라. 일반화된 제안형으로 표현한다.
+  · 독자의 구체적 상황(특정 회사·거래처 등)을 지어내 단정하지 마라. 일반화된 제안형으로 표현한다.
 
 - 전문 용어는 자연스러운 한국어로 옮기되 필요하면 영문 원어를 괄호로 병기한다.
 - 모든 출력은 한국어로 작성한다(originalTitle 제외).`;
+}
 
 /**
  * @param {string} text - 원문 본문
@@ -165,11 +172,11 @@ const SYSTEM = `너는 영어 장문 자료를 한국어로 옮겨 주는 전문
  */
 // Render↔Anthropic 간헐적 연결 끊김("Premature close") 대비:
 // 스트리밍으로 받아 연결을 유지하고, 실패하면 최대 3회 재시도한다.
-async function runStructured(messages, onProgress = () => {}) {
+async function runStructured(messages, onProgress = () => {}, perspective = "") {
   const params = {
     model: MODEL,
     max_tokens: 16000,
-    system: SYSTEM,
+    system: buildSystem(perspective),
     thinking: { type: "adaptive" },
     output_config: { format: { type: "json_schema", schema: SCHEMA } },
     messages,
@@ -194,7 +201,7 @@ async function runStructured(messages, onProgress = () => {}) {
   throw lastErr;
 }
 
-export async function distillArticle(text, { url = "", sourceTitle = "", onProgress } = {}) {
+export async function distillArticle(text, { url = "", sourceTitle = "", onProgress, perspective = "" } = {}) {
   const header = [sourceTitle && `원문 제목: ${sourceTitle}`, url && `출처: ${url}`]
     .filter(Boolean)
     .join("\n");
@@ -204,11 +211,11 @@ export async function distillArticle(text, { url = "", sourceTitle = "", onProgr
       role: "user",
       content: `${header}\n\n아래 영어 본문을 위 원칙에 따라 한글로 번역·구조화·증류해줘.\n\n---\n${text}`,
     },
-  ], onProgress);
+  ], onProgress, perspective);
 }
 
 // PDF(논문·보고서 등)를 Claude가 직접 읽어 정리한다.
-export async function distillPdf(base64, { filename = "문서", onProgress } = {}) {
+export async function distillPdf(base64, { filename = "문서", onProgress, perspective = "" } = {}) {
   return runStructured([
     {
       role: "user",
@@ -224,7 +231,7 @@ export async function distillPdf(base64, { filename = "문서", onProgress } = {
         },
       ],
     },
-  ], onProgress);
+  ], onProgress, perspective);
 }
 
 

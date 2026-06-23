@@ -108,6 +108,15 @@ textarea { resize: vertical; }
   padding: 12px; border: 1px dashed var(--border); border-radius: 8px; background: var(--bg);
 }
 
+/* 관점 프리셋 칩 */
+.lens-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  font: inherit; font-size: 12.5px; cursor: pointer;
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: #fff; color: var(--text);
+}
+.chip:hover { background: var(--accent); border-color: var(--primary); }
+
 /* Result */
 .result { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
 .result h2 { margin: 8px 0 4px; font-size: 22px; }

@@ -54,7 +54,7 @@ async function streamDigest(res, run) {
 
 // 링크 → 본문 fetch → 증류 (진행 상황 스트리밍)
 app.post("/api/digest", async (req, res) => {
-  const { url } = req.body || {};
+  const { url, perspective = "" } = req.body || {};
   if (!url) return res.status(400).json({ error: "링크가 없습니다." });
   await streamDigest(res, async (onProgress) => {
     onProgress(`링크 여는 중: ${url.trim()}`);
@@ -62,7 +62,7 @@ app.post("/api/digest", async (req, res) => {
     const srcUrl = fetched.url || url; // 트윗 공유 링크면 실제 목적지 URL
     onProgress(`본문 확보 (${fetched.text.length.toLocaleString()}자) — 증류 단계로`);
     const result = await distillArticle(fetched.text, {
-      url: srcUrl, sourceTitle: fetched.title, onProgress,
+      url: srcUrl, sourceTitle: fetched.title, onProgress, perspective,
     });
     return { url: srcUrl, via: fetched.via, ...result };
   });
@@ -70,26 +70,26 @@ app.post("/api/digest", async (req, res) => {
 
 // 본문 직접 붙여넣기 → 증류 (봇 차단 사이트 우회용)
 app.post("/api/digest-text", async (req, res) => {
-  const { text, url = "", title = "" } = req.body || {};
+  const { text, url = "", title = "", perspective = "" } = req.body || {};
   if (!text || text.trim().length < 100) {
     return res.status(400).json({ error: "본문 텍스트가 너무 짧습니다." });
   }
   await streamDigest(res, async (onProgress) => {
     onProgress(`붙여넣은 본문 ${text.trim().length.toLocaleString()}자 — 증류 시작`);
-    const result = await distillArticle(text.trim(), { url, sourceTitle: title, onProgress });
+    const result = await distillArticle(text.trim(), { url, sourceTitle: title, onProgress, perspective });
     return { url, via: "paste", ...result };
   });
 });
 
 // PDF 업로드(base64) → Claude가 직접 읽어 정리
 app.post("/api/digest-pdf", async (req, res) => {
-  const { base64, filename = "문서.pdf", url = "" } = req.body || {};
+  const { base64, filename = "문서.pdf", url = "", perspective = "" } = req.body || {};
   if (!base64 || base64.length < 100) {
     return res.status(400).json({ error: "PDF 데이터가 비어 있습니다." });
   }
   await streamDigest(res, async (onProgress) => {
     onProgress(`PDF "${filename}" 업로드됨 — Claude가 직접 읽는 중`);
-    const result = await distillPdf(base64, { filename, onProgress });
+    const result = await distillPdf(base64, { filename, onProgress, perspective });
     return { url, via: "pdf", ...result };
   });
 });
