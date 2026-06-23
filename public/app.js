@@ -4,7 +4,24 @@
   "use strict";
 
   const STORAGE_KEY = "reader-archive/v1";
+  const LENS_KEY = "reader-perspective/v1";
   const $ = (id) => document.getElementById(id);
+
+  /* ---------- 독자 관점(렌즈) ---------- */
+  // 비우면 서버 기본값(반도체 마케터)으로 분석된다. 입력값은 localStorage에 저장.
+  function getPerspective() {
+    return ($("lens-input").value || "").trim();
+  }
+  function loadPerspective() {
+    try { return localStorage.getItem(LENS_KEY) || ""; } catch { return ""; }
+  }
+  function savePerspective() {
+    try { localStorage.setItem(LENS_KEY, getPerspective()); } catch {}
+  }
+  // 결과 헤딩에 쓰는 짧은 관점 라벨.
+  function angleTitleOf(p) {
+    return (p || "").trim() || "반도체 마케터";
+  }
 
   let records = load();
   let currentId = null;
@@ -100,7 +117,9 @@
     if (!url) return alert("링크를 입력하세요.");
     busy(true);
     try {
-      const result = await postStream("/api/digest", { url });
+      const perspective = getPerspective();
+      const result = await postStream("/api/digest", { url, perspective });
+      result.perspective = perspective;
       logStep("🎉 완료");
       saveAndShow(result);
       $("url").value = "";
@@ -115,11 +134,14 @@
     if (text.length < 100) return alert("본문을 100자 이상 붙여넣어 주세요.");
     busy(true);
     try {
+      const perspective = getPerspective();
       const result = await postStream("/api/digest-text", {
         text,
         title: $("paste-title").value.trim(),
         url: $("paste-url").value.trim(),
+        perspective,
       });
+      result.perspective = perspective;
       logStep("🎉 완료");
       saveAndShow(result);
       $("paste-text").value = "";
@@ -153,7 +175,9 @@
     try {
       logStep(`PDF 읽는 중: ${file.name} (${(file.size / 1048576).toFixed(1)}MB)`);
       const base64 = await fileToBase64(file);
-      const result = await postStream("/api/digest-pdf", { base64, filename: file.name });
+      const perspective = getPerspective();
+      const result = await postStream("/api/digest-pdf", { base64, filename: file.name, perspective });
+      result.perspective = perspective;
       logStep("🎉 완료");
       saveAndShow(result);
       $("pdf-file").value = "";
@@ -220,6 +244,9 @@
   function renderInsight(r) {
     // 핵심 시사점
     fillList("r-takeaways", r.keyTakeaways || []);
+
+    // 관점 헤딩(이 글을 분석한 관점). 구버전 기록은 기본값으로.
+    $("r-angle-title").textContent = angleTitleOf(r.perspective);
 
     const angle = r.marketerAngle;
     const relEl = $("r-relevance");
@@ -319,6 +346,18 @@
     $("pdf-box").classList.toggle("hidden"));
   $("delete-btn").addEventListener("click", removeCurrent);
   $("search").addEventListener("input", renderList);
+
+  // 관점 설정: 토글 열기/닫기, 저장, 프리셋 칩
+  $("toggle-lens").addEventListener("click", () =>
+    $("lens-box").classList.toggle("hidden"));
+  $("lens-input").value = loadPerspective();
+  $("lens-input").addEventListener("change", savePerspective);
+  document.querySelectorAll(".lens-presets .chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      $("lens-input").value = chip.dataset.lens || "";
+      savePerspective();
+    });
+  });
 
   renderList();
 })();

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>영문 아티클 한글 리더</title>
-  <link rel="stylesheet" href="style.css?v=3" />
+  <link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body>
   <header class="app-header">
@@ -29,7 +29,20 @@
       <div class="sub-row">
         <button id="toggle-paste" class="link-btn">링크가 막히면 → 본문 직접 붙여넣기</button>
         <button id="toggle-pdf" class="link-btn">📄 PDF 올리기</button>
+        <button id="toggle-lens" class="link-btn">🎯 관점 설정</button>
         <span id="status" class="status"></span>
+      </div>
+
+      <!-- 독자 관점(렌즈) 설정(접힘) -->
+      <div id="lens-box" class="paste-box hidden">
+        <p class="hint">어떤 <b>관점·맥락</b>으로 분석할지 적어주세요. 비워두면 기본값(반도체 마케터·AI 동향)으로 분석해요. 한 번 정하면 저장돼 다음에도 유지됩니다.</p>
+        <input id="lens-input" type="text" placeholder="예: 스타트업 창업자 / 반도체 영업담당 / AI 투자자 / 그냥 일반 독자…" />
+        <div class="lens-presets">
+          <button type="button" class="chip" data-lens="">반도체 마케터(기본)</button>
+          <button type="button" class="chip" data-lens="AI 스타트업 창업자">스타트업 창업자</button>
+          <button type="button" class="chip" data-lens="AI·반도체 분야에 투자하는 투자자">투자자</button>
+          <button type="button" class="chip" data-lens="특정 배경 없이 교양으로 읽는 일반 독자">일반 독자</button>
+        </div>
       </div>
 
       <!-- 진행 상황 로그(단계별) -->
@@ -65,9 +78,9 @@
         <h3>💡 핵심 시사점</h3>
         <ul id="r-takeaways"></ul>
 
-        <h3>📌 반도체 마케터 관점 <span id="r-relevance" class="relevance"></span></h3>
+        <h3>📌 <span id="r-angle-title">반도체 마케터</span> 관점 <span id="r-relevance" class="relevance"></span></h3>
         <ul id="r-angle"></ul>
-        <p id="r-angle-none" class="muted small hidden">이 글은 반도체·AI 마케팅과 직접 연관은 약해요.</p>
+        <p id="r-angle-none" class="muted small hidden">이 글은 설정한 관점과 직접 연관은 약해요.</p>
 
         <h3>본문 (한글 정리)</h3>
         <div id="r-sections"></div>
@@ -85,6 +98,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
