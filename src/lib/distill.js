@@ -1,11 +1,22 @@
-// 영문 본문을 받아 한글로 번역·구조화·증류한다. (Claude claude-opus-4-8)
+// 영문 본문을 받아 한글로 번역·구조화·증류한다. (Claude claude-sonnet-4-6)
 // 독자 관점(렌즈)은 사용자가 주입할 수 있고, 비우면 기본값(반도체 마케터·AI 동향)을 쓴다.
 // 무관한 글까지 억지로 그 관점에 끼워 맞추지 않도록 — 연관도를 정직하게 표시한다.
 import Anthropic from "@anthropic-ai/sdk";
 import https from "node:https";
 import { Readable } from "node:stream";
 
-const MODEL = "claude-opus-4-8";
+// 번역·구조화는 Opus까지 안 가도 품질이 충분하고, Sonnet은 출력이 40% 저렴하다
+// ($25→$15/1M). 비용을 크게 줄이려고 Sonnet 4.6을 기본으로 쓴다.
+const MODEL = "claude-sonnet-4-6";
+export const MODEL_LABEL = "Sonnet 4.6"; // 화면 표시용
+const RATE_IN = 3, RATE_OUT = 15; // $/1M (Sonnet 4.6)
+
+// 입력 글자수로 변환 비용을 대략 추정한다(아주 거친 추정 — 경고 표시용).
+export function estimateCostUsd(chars) {
+  const inTok = chars / 4;                       // 영어 ≈ 4자/토큰
+  const outTok = Math.min(inTok * 1.3, 64000);   // 한글 번역 출력 대략, 한도 64K
+  return (inTok * RATE_IN + outTok * RATE_OUT) / 1e6;
+}
 
 // node:https 기반 custom fetch — Render에서 native fetch(undici)가 Anthropic 연결을
 // 도중에 끊는("Premature close") 문제를 우회한다. (응답을 끝까지 받아 버퍼로 반환)
@@ -208,11 +219,21 @@ async function runStructured(messages, onProgress = () => {}, perspective = "") 
     } catch (err) {
       lastErr = err;
       onProgress(`✗ 증류 실패: ${err.message}`);
-      if (err.noRetry) throw err; // 잘림 등 재시도가 무의미한 오류
+      // 재시도는 "일시적" 오류(연결 끊김·과부하·5xx)에만 한다. 잘림이나 결정적
+      // 오류를 재시도하면 비싼 출력만 또 생성돼 비용이 낭비된다.
+      if (err.noRetry || !isTransient(err)) throw err;
       if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt)); // 3s, 6s
     }
   }
   throw lastErr;
+}
+
+// 재시도할 가치가 있는 일시적 오류인지. (연결 끊김 "Premature close" 포함)
+function isTransient(err) {
+  const s = err && err.status;
+  if (s === 408 || s === 409 || s === 429 || (s >= 500 && s <= 599)) return true;
+  const m = ((err && err.message) || "").toLowerCase();
+  return /premature close|terminated|econnreset|socket hang|network|fetch failed|overloaded|timeout|aborted/.test(m);
 }
 
 export async function distillArticle(text, { url = "", sourceTitle = "", onProgress, perspective = "" } = {}) {

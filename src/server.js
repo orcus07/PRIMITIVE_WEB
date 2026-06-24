@@ -6,10 +6,19 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 
 import { fetchArticle } from "./lib/fetchArticle.js";
-import { distillArticle, distillPdf } from "./lib/distill.js";
+import { distillArticle, distillPdf, estimateCostUsd, MODEL_LABEL } from "./lib/distill.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
+
+// 긴 글이면 시작 시점에 예상 비용을 로그로 알려준다(경고 표시).
+const LONG_CHARS = 40000;
+function warnIfLong(onProgress, chars) {
+  if (chars > LONG_CHARS) {
+    const usd = estimateCostUsd(chars);
+    onProgress(`⚠️ 긴 글(${chars.toLocaleString()}자) — 예상 비용 약 $${usd.toFixed(2)} (모델: ${MODEL_LABEL})`);
+  }
+}
 
 const app = express();
 app.use(express.json({ limit: "30mb" })); // PDF base64 수용
@@ -93,6 +102,7 @@ app.post("/api/digest", (req, res) => {
     const fetched = await fetchArticle(url.trim(), onProgress);
     const srcUrl = fetched.url || url; // 트윗 공유 링크면 실제 목적지 URL
     onProgress(`본문 확보 (${fetched.text.length.toLocaleString()}자) — 증류 단계로`);
+    warnIfLong(onProgress, fetched.text.length);
     const result = await distillArticle(fetched.text, {
       url: srcUrl, sourceTitle: fetched.title, onProgress, perspective,
     });
@@ -109,6 +119,7 @@ app.post("/api/digest-text", (req, res) => {
   }
   const job = startJob(async (onProgress) => {
     onProgress(`붙여넣은 본문 ${text.trim().length.toLocaleString()}자 — 증류 시작`);
+    warnIfLong(onProgress, text.trim().length);
     const result = await distillArticle(text.trim(), { url, sourceTitle: title, onProgress, perspective });
     return { url, via: "paste", ...result, perspective };
   });
@@ -123,6 +134,9 @@ app.post("/api/digest-pdf", (req, res) => {
   }
   const job = startJob(async (onProgress) => {
     onProgress(`PDF "${filename}" 업로드됨 — Claude가 직접 읽는 중`);
+    if (base64.length > 2_000_000) { // ~1.5MB 이상 → 분량 큼
+      onProgress(`⚠️ 분량이 큰 PDF — 쪽수가 많으면 비용이 더 들 수 있어요 (모델: ${MODEL_LABEL})`);
+    }
     const result = await distillPdf(base64, { filename, onProgress, perspective });
     return { url, via: "pdf", ...result, perspective };
   });
