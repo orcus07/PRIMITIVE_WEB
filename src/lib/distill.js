@@ -175,10 +175,14 @@ function buildSystem(perspective) {
 async function runStructured(messages, onProgress = () => {}, perspective = "") {
   const params = {
     model: MODEL,
-    max_tokens: 16000,
+    // 긴 글의 충실한 번역은 출력 토큰을 많이 쓴다. 16K로는 JSON이 중간에 잘려
+    // ("Unterminated string in JSON") 파싱이 실패한다. 스트리밍이라 최대 128K까지
+    // 안전. effort는 medium — adaptive '사고' 토큰도 max_tokens에서 차감되므로
+    // high면 출력 예산을 갉아먹는다. 번역·구조화에는 medium이 충분하고 더 빠르다.
+    max_tokens: 64000,
     system: buildSystem(perspective),
     thinking: { type: "adaptive" },
-    output_config: { format: { type: "json_schema", schema: SCHEMA } },
+    output_config: { effort: "medium", format: { type: "json_schema", schema: SCHEMA } },
     messages,
   };
 
@@ -188,6 +192,15 @@ async function runStructured(messages, onProgress = () => {}, perspective = "") 
       onProgress(attempt === 1 ? "Claude 증류 중… (번역·구조화)" : `Claude 재시도 ${attempt}/3…`);
       const stream = client().messages.stream(params);
       const message = await stream.finalMessage();
+      // 출력이 한도에서 잘렸다면 JSON이 불완전하다. 재시도해도 같은 결과이므로
+      // 즉시 명확한 안내로 중단한다(무의미한 재시도 방지).
+      if (message.stop_reason === "max_tokens") {
+        const err = new Error(
+          "글이 너무 길어 한 번에 정리하지 못했어요(출력 한도 초과). 본문을 줄이거나 둘로 나눠서 다시 시도해주세요."
+        );
+        err.noRetry = true;
+        throw err;
+      }
       const block = message.content.find((b) => b.type === "text");
       if (!block) throw new Error("Claude 응답에서 결과를 찾지 못했습니다.");
       onProgress("✓ 증류 완료");
@@ -195,6 +208,7 @@ async function runStructured(messages, onProgress = () => {}, perspective = "") 
     } catch (err) {
       lastErr = err;
       onProgress(`✗ 증류 실패: ${err.message}`);
+      if (err.noRetry) throw err; // 잘림 등 재시도가 무의미한 오류
       if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt)); // 3s, 6s
     }
   }
