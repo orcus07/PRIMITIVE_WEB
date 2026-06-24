@@ -30,33 +30,65 @@ app.get("/api/health", (_req, res) => {
   res.json({ anthropic: Boolean(process.env.ANTHROPIC_API_KEY) });
 });
 
-// 진행 상황을 한 줄씩(NDJSON) 흘려보내기 위한 헬퍼.
-// {type:"step",msg} 진행 단계 / {type:"result",data} 최종 / {type:"error",error}
-function ndjson(res) {
-  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("X-Accel-Buffering", "no"); // 프록시 버퍼링 방지
-  return (obj) => res.write(JSON.stringify(obj) + "\n");
-}
+// ──────────────────────────────────────────────────────────────
+// 작업(job) 모델: 변환을 "연결"이 아니라 서버 메모리에 묶는다.
+// 브라우저가 백그라운드로 가거나 탭이 새로고침돼도 작업은 계속 돌고,
+// 클라이언트는 jobId로 폴링해 진행 상황과 결과를 이어받는다.
+// (무료 Render는 단일 인스턴스 + 장시간 유휴 시 잠들므로, 메모리 저장으로 충분.)
+// ──────────────────────────────────────────────────────────────
+const jobs = new Map(); // id -> { id, status, steps, result, error, createdAt }
+const JOB_TTL = 30 * 60 * 1000; // 30분 후 만료
 
-// 스트리밍 작업 공통 래퍼: 단계별 진행을 흘리고 결과/에러로 마무리.
-async function streamDigest(res, run) {
-  const send = ndjson(res);
-  const onProgress = (msg) => send({ type: "step", msg });
-  try {
-    const data = await run(onProgress);
-    send({ type: "result", data });
-  } catch (err) {
-    send({ type: "error", error: err.message || "처리 중 오류가 발생했습니다." });
+function sweepJobs(now) {
+  for (const [id, j] of jobs) {
+    if (now - j.createdAt > JOB_TTL) jobs.delete(id);
   }
-  res.end();
 }
 
-// 링크 → 본문 fetch → 증류 (진행 상황 스트리밍)
-app.post("/api/digest", async (req, res) => {
+// run(onProgress)을 연결과 무관하게 백그라운드로 실행하고 job을 반환한다.
+function startJob(run) {
+  const now = Date.now();
+  sweepJobs(now);
+  const id = "job_" + now.toString(36) + Math.random().toString(36).slice(2, 8);
+  const job = { id, status: "running", steps: [], result: null, error: null, createdAt: now };
+  jobs.set(id, job);
+
+  const onProgress = (msg) => job.steps.push({ ms: Date.now() - job.createdAt, msg });
+  // fire-and-forget: res 수명과 분리 — 클라이언트가 떠나도 끝까지 실행된다.
+  (async () => {
+    try {
+      job.result = await run(onProgress);
+      job.status = "done";
+    } catch (err) {
+      job.error = err.message || "처리 중 오류가 발생했습니다.";
+      job.status = "error";
+    }
+  })();
+
+  return job;
+}
+
+// 작업 진행 상황/결과 폴링.
+app.get("/api/job/:id", (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) {
+    return res.status(404).json({
+      error: "작업을 찾을 수 없어요. (오래 지나 만료됐거나 서버가 재시작됐을 수 있어요)",
+    });
+  }
+  res.json({
+    status: job.status,
+    steps: job.steps,
+    result: job.result,
+    error: job.error,
+  });
+});
+
+// 링크 → 본문 fetch → 증류 (백그라운드 작업으로 실행, jobId 즉시 반환)
+app.post("/api/digest", (req, res) => {
   const { url, perspective = "" } = req.body || {};
   if (!url) return res.status(400).json({ error: "링크가 없습니다." });
-  await streamDigest(res, async (onProgress) => {
+  const job = startJob(async (onProgress) => {
     onProgress(`링크 여는 중: ${url.trim()}`);
     const fetched = await fetchArticle(url.trim(), onProgress);
     const srcUrl = fetched.url || url; // 트윗 공유 링크면 실제 목적지 URL
@@ -64,34 +96,37 @@ app.post("/api/digest", async (req, res) => {
     const result = await distillArticle(fetched.text, {
       url: srcUrl, sourceTitle: fetched.title, onProgress, perspective,
     });
-    return { url: srcUrl, via: fetched.via, ...result };
+    return { url: srcUrl, via: fetched.via, ...result, perspective };
   });
+  res.json({ jobId: job.id });
 });
 
 // 본문 직접 붙여넣기 → 증류 (봇 차단 사이트 우회용)
-app.post("/api/digest-text", async (req, res) => {
+app.post("/api/digest-text", (req, res) => {
   const { text, url = "", title = "", perspective = "" } = req.body || {};
   if (!text || text.trim().length < 100) {
     return res.status(400).json({ error: "본문 텍스트가 너무 짧습니다." });
   }
-  await streamDigest(res, async (onProgress) => {
+  const job = startJob(async (onProgress) => {
     onProgress(`붙여넣은 본문 ${text.trim().length.toLocaleString()}자 — 증류 시작`);
     const result = await distillArticle(text.trim(), { url, sourceTitle: title, onProgress, perspective });
-    return { url, via: "paste", ...result };
+    return { url, via: "paste", ...result, perspective };
   });
+  res.json({ jobId: job.id });
 });
 
 // PDF 업로드(base64) → Claude가 직접 읽어 정리
-app.post("/api/digest-pdf", async (req, res) => {
+app.post("/api/digest-pdf", (req, res) => {
   const { base64, filename = "문서.pdf", url = "", perspective = "" } = req.body || {};
   if (!base64 || base64.length < 100) {
     return res.status(400).json({ error: "PDF 데이터가 비어 있습니다." });
   }
-  await streamDigest(res, async (onProgress) => {
+  const job = startJob(async (onProgress) => {
     onProgress(`PDF "${filename}" 업로드됨 — Claude가 직접 읽는 중`);
     const result = await distillPdf(base64, { filename, onProgress, perspective });
-    return { url, via: "pdf", ...result };
+    return { url, via: "pdf", ...result, perspective };
   });
+  res.json({ jobId: job.id });
 });
 
 const PORT = process.env.PORT || 3000;
