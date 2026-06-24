@@ -74,42 +74,77 @@
     setStatus(msg);
   }
 
-  // NDJSON 스트림을 읽으며 진행 단계를 logStep으로 표시하고 최종 결과를 반환.
-  async function postStream(endpoint, body) {
+  // ── 작업(job) 폴링 ──────────────────────────────────────────
+  // 변환은 서버에서 연결과 무관하게 돌아간다. 브라우저는 jobId를 폴링해
+  // 진행 상황을 표시하고 결과를 받는다. 백그라운드/새로고침에도 살아남는다.
+  const PENDING_KEY = "reader-pending-job/v1";
+  function savePending(id) { try { localStorage.setItem(PENDING_KEY, id); } catch {} }
+  function clearPending() { try { localStorage.removeItem(PENDING_KEY); } catch {} }
+  function loadPending() { try { return localStorage.getItem(PENDING_KEY) || ""; } catch { return ""; } }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // 서버가 준 경과시간(ms) 기준으로 진행 로그 한 줄 추가.
+  function logStepMs(ms, msg) {
+    const log = $("progress-log");
+    log.classList.remove("hidden");
+    const li = document.createElement("li");
+    li.textContent = `+${(ms / 1000).toFixed(1)}s  ${msg}`;
+    log.appendChild(li);
+    log.scrollTop = log.scrollHeight;
+    setStatus(msg);
+  }
+
+  function resultIsOk(r) {
+    return !!(r && (r.koreanTitle || r.originalTitle || (r.sections && r.sections.length)));
+  }
+
+  // 작업 제출 → jobId.
+  async function submitJob(endpoint, body) {
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.body) { // 스트림 미지원/즉시 에러
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || `오류 (${res.status})`);
-    }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "", result = null;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.jobId) throw new Error(data.error || `오류 (${res.status})`);
+    return data.jobId;
+  }
+
+  // jobId 폴링. 백그라운드 복귀 시 일시적 네트워크 오류는 재시도로 흡수.
+  async function pollJob(jobId) {
+    let shown = 0, netErrors = 0;
     for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        let evt;
-        try { evt = JSON.parse(line); } catch { continue; }
-        if (evt.type === "step") logStep(evt.msg);
-        else if (evt.type === "error") throw new Error(evt.error);
-        else if (evt.type === "result") result = evt.data;
+      let res, data;
+      try {
+        res = await fetch(`/api/job/${jobId}`);
+        data = await res.json().catch(() => ({}));
+      } catch {
+        if (++netErrors > 40) throw new Error("연결이 계속 끊겨요. 잠시 후 다시 시도해주세요.");
+        await sleep(2000);
+        continue;
       }
+      if (res.status === 404) throw new Error(data.error || "작업을 찾을 수 없어요.");
+      netErrors = 0;
+      const steps = data.steps || [];
+      for (; shown < steps.length; shown++) logStepMs(steps[shown].ms, steps[shown].msg);
+      if (data.status === "done") {
+        if (!resultIsOk(data.result)) throw new Error("결과가 비어 있어요. 새로고침 후 다시 시도해주세요.");
+        return data.result;
+      }
+      if (data.status === "error") throw new Error(data.error || "처리 중 오류가 발생했습니다.");
+      await sleep(1500);
     }
-    if (!result) throw new Error("결과를 받지 못했습니다. (연결이 끊겼을 수 있어요)");
-    // 빈/깨진 결과(예: 캐시된 옛 코드가 스트림을 잘못 해석한 경우) 저장 방지
-    const ok = result.koreanTitle || result.originalTitle ||
-      (result.sections && result.sections.length);
-    if (!ok) throw new Error("결과가 비어 있어요. 페이지를 새로고침(캐시 비우기) 후 다시 시도해주세요.");
-    return result;
+  }
+
+  // 제출 + pending 저장 + 폴링. 완료/실패 시 pending 정리(이어보기 중단).
+  async function runJob(endpoint, body) {
+    const jobId = await submitJob(endpoint, body);
+    savePending(jobId);
+    try {
+      return await pollJob(jobId);
+    } finally {
+      clearPending();
+    }
   }
 
   async function digestUrl() {
@@ -117,9 +152,7 @@
     if (!url) return alert("링크를 입력하세요.");
     busy(true);
     try {
-      const perspective = getPerspective();
-      const result = await postStream("/api/digest", { url, perspective });
-      result.perspective = perspective;
+      const result = await runJob("/api/digest", { url, perspective: getPerspective() });
       logStep("🎉 완료");
       saveAndShow(result);
       $("url").value = "";
@@ -134,14 +167,12 @@
     if (text.length < 100) return alert("본문을 100자 이상 붙여넣어 주세요.");
     busy(true);
     try {
-      const perspective = getPerspective();
-      const result = await postStream("/api/digest-text", {
+      const result = await runJob("/api/digest-text", {
         text,
         title: $("paste-title").value.trim(),
         url: $("paste-url").value.trim(),
-        perspective,
+        perspective: getPerspective(),
       });
-      result.perspective = perspective;
       logStep("🎉 완료");
       saveAndShow(result);
       $("paste-text").value = "";
@@ -175,9 +206,7 @@
     try {
       logStep(`PDF 읽는 중: ${file.name} (${(file.size / 1048576).toFixed(1)}MB)`);
       const base64 = await fileToBase64(file);
-      const perspective = getPerspective();
-      const result = await postStream("/api/digest-pdf", { base64, filename: file.name, perspective });
-      result.perspective = perspective;
+      const result = await runJob("/api/digest-pdf", { base64, filename: file.name, perspective: getPerspective() });
       logStep("🎉 완료");
       saveAndShow(result);
       $("pdf-file").value = "";
@@ -360,4 +389,18 @@
   });
 
   renderList();
+
+  // 페이지 진입 시, 백그라운드/새로고침으로 끊겼던 진행 중 작업이 있으면 이어받는다.
+  function resumePendingJob() {
+    const jobId = loadPending();
+    if (!jobId) return;
+    busy(true); // 로그 초기화 + 버튼 비활성화
+    setStatus("이전 작업 이어보는 중…");
+    logStep("⏳ 진행 중이던 작업을 이어받는 중…");
+    pollJob(jobId)
+      .then((result) => { logStep("🎉 완료"); saveAndShow(result); })
+      .catch((err) => { logStep("❌ " + err.message); })
+      .finally(() => { clearPending(); busy(false); });
+  }
+  resumePendingJob();
 })();
