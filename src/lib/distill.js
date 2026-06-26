@@ -124,8 +124,13 @@ const SCHEMA = {
         properties: {
           heading: { type: "string", description: "소제목" },
           content: { type: "string", description: "해당 부분의 한글 본문 (맥락 손실 최소화)" },
+          original: {
+            type: "string",
+            description:
+              "이 섹션 한글 본문에 대응하는 원문(영문) 발췌. 번역하지 말고 원문 그대로 옮긴다. 원문을 못 구한 경우(예: 일부 트윗)엔 빈 문자열.",
+          },
         },
-        required: ["heading", "content"],
+        required: ["heading", "content", "original"],
         additionalProperties: false,
       },
     },
@@ -162,6 +167,7 @@ function buildSystem(perspective) {
 번역·정리 원칙:
 - 번역은 원문의 의도와 뉘앙스에 충실하게, 맥락 손실을 최소화한다. 임의로 줄이거나 왜곡하지 않는다.
 - sections는 "요약"이 아니라 원문 흐름을 따라간 충실한 한글 정리다. 중요한 논지·근거·숫자·사례를 빠뜨리지 않는다.
+- 각 section의 original 필드에는 그 한글 본문(content)에 대응하는 원문(영문)을 "번역하지 말고 원문 그대로" 옮긴다. 독자가 원문과 대조할 수 있게 하기 위함이다. 원문을 구할 수 없으면 빈 문자열로 둔다.
 - oneLiner와 topic은 글의 본질을 증류해 한눈에 파악하게 한다.
 - 원문에 없는 사실·숫자·고유명사를 절대 지어내지 않는다. 확실하지 않으면 적지 않는다.
 

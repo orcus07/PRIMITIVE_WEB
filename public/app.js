@@ -303,7 +303,16 @@
       const div = document.createElement("div"); div.className = "section";
       const h = document.createElement("h4"); h.textContent = s.heading || "";
       const p = document.createElement("p"); p.textContent = s.content || "";
-      div.append(h, p); wrap.appendChild(div);
+      div.append(h, p);
+      // 원문(영문) 대조 — GitHub식 펼치기. 원문이 있을 때만 표시.
+      const orig = (s.original || "").trim();
+      if (orig) {
+        const det = document.createElement("details"); det.className = "orig";
+        const sum = document.createElement("summary"); sum.textContent = "원문 보기";
+        const op = document.createElement("p"); op.className = "orig-text"; op.textContent = orig;
+        det.append(sum, op); div.appendChild(det);
+      }
+      wrap.appendChild(div);
     });
   }
   function renderTerms(terms) {
@@ -342,6 +351,7 @@
     $("empty-list").classList.toggle("hidden", filtered.length > 0);
     $("empty-list").textContent =
       records.length === 0 ? "아직 읽은 글이 없습니다." : "검색 결과가 없습니다.";
+    $("list-count").textContent = records.length;
   }
 
   function searchText(r) {
@@ -375,6 +385,26 @@
     $("pdf-box").classList.toggle("hidden"));
   $("delete-btn").addEventListener("click", removeCurrent);
   $("search").addEventListener("input", renderList);
+
+  // 읽은 글 목록 접기/펴기 (모바일에선 기본 접힘 — 입력·결과가 바로 보이도록)
+  const LIST_KEY = "reader-list-collapsed/v1";
+  function applyListCollapsed(collapsed) {
+    $("list-wrap").classList.toggle("hidden", collapsed);
+    $("list-toggle").setAttribute("aria-expanded", String(!collapsed));
+    $("list-toggle").classList.toggle("collapsed", collapsed);
+  }
+  let listCollapsed;
+  try { listCollapsed = localStorage.getItem(LIST_KEY); } catch {}
+  // 저장값 없으면: 모바일은 접힘, 데스크톱은 펼침
+  if (listCollapsed === null || listCollapsed === undefined) {
+    listCollapsed = window.innerWidth <= 760 ? "1" : "0";
+  }
+  applyListCollapsed(listCollapsed === "1");
+  $("list-toggle").addEventListener("click", () => {
+    const nowCollapsed = !$("list-wrap").classList.contains("hidden");
+    applyListCollapsed(nowCollapsed);
+    try { localStorage.setItem(LIST_KEY, nowCollapsed ? "1" : "0"); } catch {}
+  });
 
   // 관점 설정: 토글 열기/닫기, 저장, 프리셋 칩
   $("toggle-lens").addEventListener("click", () =>
