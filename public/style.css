@@ -48,7 +48,17 @@ body {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: 10px; box-shadow: var(--shadow); padding: 16px; height: fit-content;
 }
-.list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+/* 읽은 글 접기/펴기 헤더 */
+.list-toggle {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  font: inherit; font-weight: 600; font-size: 14px; cursor: pointer;
+  background: none; border: none; padding: 4px 2px; color: var(--text);
+}
+.list-toggle .chevron { transition: transform 0.15s; color: var(--muted); }
+.list-toggle.collapsed .chevron { transform: rotate(-90deg); }
+/* 목록이 길어도 사이드바 안에서만 스크롤되게 */
+.list-wrap { margin-top: 8px; max-height: 60vh; overflow-y: auto; }
+.list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .list-item { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
 .list-item:hover { background: var(--accent); }
 .list-item.active { border-color: var(--primary); background: var(--accent); }
@@ -145,6 +155,22 @@ blockquote {
 .section { margin-bottom: 16px; }
 .section h4 { margin: 0 0 4px; font-size: 15px; }
 .section p { margin: 0; white-space: pre-wrap; }
+/* 원문(영문) 대조 — GitHub식 펼치기 */
+.orig { margin-top: 6px; }
+.orig summary {
+  cursor: pointer; font-size: 12.5px; color: var(--primary);
+  user-select: none; list-style: none; display: inline-flex; align-items: center; gap: 4px;
+}
+.orig summary::-webkit-details-marker { display: none; }
+.orig summary::before { content: "▸"; color: var(--muted); }
+.orig[open] summary::before { content: "▾"; }
+.orig summary:hover { text-decoration: underline; }
+.orig .orig-text {
+  margin: 6px 0 0; padding: 10px 12px;
+  background: var(--accent); border-left: 3px solid var(--border); border-radius: 6px;
+  font-size: 13.5px; color: #334155; line-height: 1.6;
+  font-family: "Georgia", "Times New Roman", serif;
+}
 dl { margin: 0; }
 dt { font-weight: 600; margin-top: 8px; }
 dd { margin: 0 0 0 0; color: var(--muted); }

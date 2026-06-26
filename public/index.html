@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>영문 아티클 한글 리더</title>
-  <link rel="stylesheet" href="style.css?v=5" />
+  <link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
   <header class="app-header">
@@ -15,9 +15,15 @@
 
   <main class="layout">
     <aside class="sidebar">
-      <input id="search" type="search" placeholder="읽은 글 검색…" />
-      <ul id="list" class="list"></ul>
-      <p id="empty-list" class="muted">아직 읽은 글이 없습니다.</p>
+      <button id="list-toggle" class="list-toggle" type="button" aria-expanded="true">
+        <span>📚 읽은 글 <span id="list-count">0</span></span>
+        <span class="chevron">▾</span>
+      </button>
+      <div id="list-wrap" class="list-wrap">
+        <input id="search" type="search" placeholder="읽은 글 검색…" />
+        <ul id="list" class="list"></ul>
+        <p id="empty-list" class="muted">아직 읽은 글이 없습니다.</p>
+      </div>
     </aside>
 
     <section class="main">
@@ -98,6 +104,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>
