@@ -249,6 +249,7 @@
     $("r-oneliner").textContent = r.oneLiner || "";
     $("r-topic").textContent = r.topic || "";
     renderInsight(r);
+    renderQuotes(r.keyQuotes);
     renderSections(r.sections);
     renderTerms(r.keyTerms);
 
@@ -315,6 +316,30 @@
       wrap.appendChild(div);
     });
   }
+  // 주요 인용 — 원문(영문) 하이라이트 + 한글 번역 + 화자. 구버전 기록엔 없음.
+  function renderQuotes(quotes) {
+    const wrap = $("r-quotes"); wrap.innerHTML = "";
+    const list = (quotes || []).filter((q) => q && (q.quote || "").trim());
+    $("r-quotes-wrap").classList.toggle("hidden", list.length === 0);
+    list.forEach((q) => {
+      const fig = document.createElement("figure"); fig.className = "quote";
+      const orig = document.createElement("p"); orig.className = "q-orig";
+      orig.textContent = `“${(q.quote || "").trim()}”`;
+      fig.appendChild(orig);
+      if ((q.translation || "").trim()) {
+        const tr = document.createElement("p"); tr.className = "q-tr";
+        tr.textContent = q.translation.trim();
+        fig.appendChild(tr);
+      }
+      if ((q.speaker || "").trim()) {
+        const who = document.createElement("figcaption"); who.className = "q-who";
+        who.textContent = `— ${q.speaker.trim()}`;
+        fig.appendChild(who);
+      }
+      wrap.appendChild(fig);
+    });
+  }
+
   function renderTerms(terms) {
     const dl = $("r-terms"); dl.innerHTML = "";
     const has = terms && terms.length;
