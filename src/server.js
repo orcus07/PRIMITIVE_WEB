@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 
 import { fetchArticle } from "./lib/fetchArticle.js";
-import { distillArticle, distillPdf, estimateCostUsd, MODEL_LABEL } from "./lib/distill.js";
+import { distillArticle, distillPdf, estimateCostUsd, MODEL_LABEL, inferReaderProfile } from "./lib/distill.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -141,6 +141,20 @@ app.post("/api/digest-pdf", (req, res) => {
     return { url, via: "pdf", ...result, perspective };
   });
   res.json({ jobId: job.id });
+});
+
+// 읽은 글 목록으로 "내 프로필(독자 관점)"을 추론한다. 작은 호출이라 동기 처리.
+app.post("/api/profile", async (req, res) => {
+  const { items } = req.body || {};
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: "읽은 글이 없어 프로필을 만들 수 없어요." });
+  }
+  try {
+    const profile = await inferReaderProfile(items);
+    res.json({ profile });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "프로필 생성 중 오류가 발생했습니다." });
+  }
 });
 
 const PORT = process.env.PORT || 3000;
