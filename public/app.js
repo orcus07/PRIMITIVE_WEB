@@ -95,7 +95,8 @@
   }).catch(() => {});
 
   /* ---------- 실행 ---------- */
-  function setStatus(msg) { $("status").textContent = msg; }
+  // 진행 상황은 까만 진행 로그로 충분 — 별도 회색 상태 텍스트는 두지 않는다.
+  function setStatus() {}
 
   function busy(on) {
     $("run-btn").disabled = on;
@@ -294,7 +295,6 @@
   function show(r) {
     currentId = r.id;
     $("result").classList.remove("hidden");
-    $("r-source").textContent = viaLabel(r.via);
     $("r-title").textContent = r.koreanTitle || r.originalTitle || "(제목 없음)";
     $("r-original").textContent = r.originalTitle ? `원제: ${r.originalTitle}` : "";
     $("r-date").textContent = r.publishedDate ? `작성일: ${r.publishedDate}` : "";
@@ -313,9 +313,6 @@
     markActive();
   }
 
-  function viaLabel(v) {
-    return { direct: "직접 수집", proxy: "프록시 우회", tweet: "트윗", pdf: "PDF", paste: "붙여넣기" }[v] || "";
-  }
   function fillList(id, items) {
     const ul = $(id); ul.innerHTML = "";
     (items || []).forEach((t) => {
