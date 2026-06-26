@@ -97,6 +97,21 @@ const SCHEMA = {
       items: { type: "string" },
       description: "글 자체의 핵심 시사점(보편적, 원문 근거 기반). 누가 읽어도 유효한 통찰 3~5개",
     },
+    keyQuotes: {
+      type: "array",
+      description:
+        "원문에서 가장 중요한 직접 인용 2~5개 — 기억에 남는 한마디, 핵심 주장, 중요 인물의 정확한 워딩. 인용할 만한 게 없으면 빈 배열.",
+      items: {
+        type: "object",
+        properties: {
+          quote: { type: "string", description: "원문 그대로의 인용(영문). 절대 바꾸거나 지어내지 말 것." },
+          speaker: { type: "string", description: "말한 사람·출처(식별되면). 없으면 빈 문자열." },
+          translation: { type: "string", description: "그 인용의 한글 번역." },
+        },
+        required: ["quote", "speaker", "translation"],
+        additionalProperties: false,
+      },
+    },
     marketerAngle: {
       type: "object",
       description: "설정된 독자 관점에서의 연관성. 억지로 연결하지 말 것.",
@@ -150,7 +165,7 @@ const SCHEMA = {
   },
   required: [
     "koreanTitle", "originalTitle", "publishedDate", "oneLiner", "topic",
-    "keyTakeaways", "marketerAngle", "sections", "keyTerms",
+    "keyTakeaways", "keyQuotes", "marketerAngle", "sections", "keyTerms",
   ],
   additionalProperties: false,
 };
@@ -173,6 +188,7 @@ function buildSystem(perspective) {
 
 인사이트 원칙 (중요):
 - keyTakeaways: 글 자체의 보편적 핵심 시사점. 원문 내용에 근거한 사실 기반 통찰이다.
+- keyQuotes: 원문에서 가장 인상적인 직접 인용을 2~5개 고른다. 기억에 남는 한마디, 핵심 주장, 중요 인물의 발언 등. quote는 원문 영어를 "그대로" 옮기고(절대 바꾸거나 지어내지 않는다), translation에 한글 번역을, speaker에 말한 사람/출처를 적는다. 인용할 만한 게 없으면 빈 배열로 둔다.
 - marketerAngle: 위 독자 관점에서의 연결은 "진짜 연관이 있을 때만" 한다.
   · 글이 그 관점과 직접 관련되면 relevance를 high/medium으로 두고 구체적으로 연결한다.
   · 관련이 약하거나 없으면 relevance를 low/none으로 솔직히 표시하고, notes에 "이 글은 해당 관점과 직접 연관은 약하다"는 점을 밝힌다. 억지로 끼워 맞추지 마라.
