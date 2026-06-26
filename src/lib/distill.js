@@ -291,4 +291,40 @@ export async function distillPdf(base64, { filename = "문서", onProgress, pers
   ], onProgress, perspective);
 }
 
+// 독자가 읽은 글 목록(제목·요약·주제)만 보고 "이 독자는 누구인가"를 한 문단으로
+// 추론한다. 결과는 그대로 독자 관점(렌즈)으로 쓰인다. 입력이 작아 비용이 매우 싸다.
+const PROFILE_SYSTEM = `너는 한 독자의 '읽은 글 목록'만 보고 그 사람을 추론해 한 문단으로 정의하는 분석가다.
+- 제목·핵심요약·주제에서 드러나는 관심사·시각·목표의 패턴을 근거로 추론한다.
+- 실명·회사 같은 단정적 개인정보를 지어내지 않는다. 드러난 관심사에 근거해 일반화한다.
+- 출력은 그대로 '독자 관점(렌즈)'으로 쓰인다. "이 독자는 ~에 관심이 많고, ~한 시각으로 글을 읽는다" 형태의 자연스러운 한국어 한 문단만 출력한다. 군더더기·머리말 없이 그 문단만.`;
+
+export async function inferReaderProfile(items = []) {
+  const list = (items || [])
+    .slice(0, 50)
+    .map((it, i) => {
+      const t = (it && it.title) || "";
+      const o = (it && it.oneLiner) ? ` — ${it.oneLiner}` : "";
+      const tp = (it && it.topic) ? ` / ${it.topic}` : "";
+      return `${i + 1}. ${t}${o}${tp}`;
+    })
+    .filter((s) => s.replace(/^\d+\.\s*/, "").trim())
+    .join("\n");
+  if (!list) throw new Error("프로필을 만들 읽은 글이 없어요.");
+
+  const stream = client().messages.stream({
+    model: MODEL,
+    max_tokens: 600,
+    system: PROFILE_SYSTEM,
+    output_config: { effort: "low" }, // 작은 추론 — 저비용·빠르게
+    messages: [
+      { role: "user", content: `다음은 한 독자가 읽고 정리한 글 목록이다. 이 사람을 한 문단으로 정의해줘.\n\n${list}` },
+    ],
+  });
+  const message = await stream.finalMessage();
+  const block = message.content.find((b) => b.type === "text");
+  const text = (block && block.text || "").trim();
+  if (!text) throw new Error("프로필 생성 결과가 비어 있어요.");
+  return text;
+}
+
 

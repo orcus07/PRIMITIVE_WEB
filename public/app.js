@@ -20,7 +20,58 @@
   }
   // 결과 헤딩에 쓰는 짧은 관점 라벨.
   function angleTitleOf(p) {
-    return (p || "").trim() || "반도체 마케터";
+    // 자동 프로필처럼 긴 문장이면 앞부분만 짧게.
+    const t = (p || "").trim();
+    if (!t) return "반도체 마케터";
+    return t.length > 24 ? t.slice(0, 24) + "…" : t;
+  }
+
+  /* ---------- 내 프로필(자동 정의) ---------- */
+  // 읽은 글들로 "나"를 추론해 관점(렌즈)에 채운다. 자동 갱신 가능.
+  const AUTO_KEY = "reader-profile-auto/v1";   // 자동 갱신 켜짐 여부
+  const LAST_AUTO_KEY = "reader-profile-last/v1"; // 마지막 자동 생성값(수동 편집 보호용)
+  function archiveSummaries() {
+    return records.map((r) => ({
+      title: r.koreanTitle || r.originalTitle || "",
+      oneLiner: r.oneLiner || "",
+      topic: r.topic || "",
+    }));
+  }
+  async function buildProfile({ silent = false } = {}) {
+    const items = archiveSummaries();
+    const status = $("profile-status");
+    if (items.length < 2) {
+      if (!silent) status.textContent = "읽은 글이 2개 이상일 때 나를 정의할 수 있어요.";
+      return;
+    }
+    status.textContent = "🧬 내 글들로 프로필 분석 중…";
+    try {
+      const res = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.profile) throw new Error(data.error || `오류 (${res.status})`);
+      $("lens-input").value = data.profile;
+      savePerspective();
+      try { localStorage.setItem(LAST_AUTO_KEY, data.profile); } catch {}
+      status.textContent = `✅ 프로필이 갱신돼 관점에 반영됐어요 (읽은 글 ${items.length}개 기반).`;
+    } catch (err) {
+      status.textContent = "❌ " + err.message;
+    }
+  }
+  // 새 글이 추가될 때, 자동 갱신이 켜져 있고 사용자가 손수 바꾼 관점이 아니면 다시 만든다.
+  function maybeAutoProfile() {
+    let auto = false;
+    try { auto = localStorage.getItem(AUTO_KEY) === "1"; } catch {}
+    if (!auto || records.length < 2) return;
+    let last = "";
+    try { last = localStorage.getItem(LAST_AUTO_KEY) || ""; } catch {}
+    const cur = ($("lens-input").value || "").trim();
+    // 비어 있거나 마지막 자동값 그대로일 때만 갱신(수동 편집은 보호)
+    if (cur && cur !== last.trim()) return;
+    buildProfile({ silent: true });
   }
 
   let records = load();
@@ -237,6 +288,7 @@
     persist();
     show(record);
     renderList();
+    maybeAutoProfile(); // 자동 갱신 켜져 있으면 새 글까지 반영해 프로필 갱신
   }
 
   function show(r) {
@@ -441,6 +493,14 @@
       $("lens-input").value = chip.dataset.lens || "";
       savePerspective();
     });
+  });
+
+  // 내 프로필(자동 정의): 수동 생성 버튼 + 자동 갱신 토글
+  $("profile-build").addEventListener("click", () => buildProfile());
+  try { $("profile-auto").checked = localStorage.getItem(AUTO_KEY) === "1"; } catch {}
+  $("profile-auto").addEventListener("change", (e) => {
+    try { localStorage.setItem(AUTO_KEY, e.target.checked ? "1" : "0"); } catch {}
+    if (e.target.checked) maybeAutoProfile(); // 켜는 즉시 한 번 반영
   });
 
   renderList();
