@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>영문 아티클 한글 리더</title>
-  <link rel="stylesheet" href="style.css?v=10" />
+  <link rel="stylesheet" href="style.css?v=11" />
 </head>
 <body>
   <header class="app-header">
@@ -106,6 +106,14 @@
           <dl id="r-terms"></dl>
         </section>
 
+        <section id="r-source-wrap" class="hidden">
+          <h3>📄 원문 전문</h3>
+          <details class="orig">
+            <summary>원문 전체 보기</summary>
+            <div id="r-source-text" class="source-text"></div>
+          </details>
+        </section>
+
         <div class="result-actions">
           <a id="r-link" class="btn" target="_blank" rel="noopener">원문 열기 ↗</a>
           <button id="delete-btn" class="btn btn-danger hidden">보관함에서 삭제</button>
@@ -114,6 +122,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

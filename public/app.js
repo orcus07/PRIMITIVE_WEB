@@ -82,7 +82,18 @@
     catch { return []; }
   }
   function persist() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+    } catch (e) {
+      // 용량 초과 — 가장 큰 항목(원문 전문)을 떼고 재시도. 현재 화면 표시는 영향 없음.
+      try {
+        records = records.map((r) => { const c = { ...r }; delete c.sourceText; return c; });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+        alert("보관 용량이 가득 차 '원문 전문'은 저장하지 못했어요. (지금 화면에서는 볼 수 있어요)");
+      } catch {
+        alert("브라우저 보관 용량이 가득 찼어요. 보관함에서 오래된 글을 삭제해 주세요.");
+      }
+    }
   }
 
   /* ---------- 키 안내 ---------- */
@@ -304,6 +315,7 @@
     renderQuotes(r.keyQuotes);
     renderSections(r.sections);
     renderTerms(r.keyTerms);
+    renderSourceText(r.sourceText);
 
     const link = $("r-link");
     if (r.url) { link.href = r.url; link.classList.remove("hidden"); }
@@ -398,6 +410,12 @@
       const dd = document.createElement("dd"); dd.textContent = t.note;
       dl.append(dt, dd);
     });
+  }
+  // 원문 전문(서버 추출). 있으면 접이식으로 표시, 없으면(스캔본 등) 숨김.
+  function renderSourceText(s) {
+    const t = (s || "").trim();
+    $("r-source-wrap").classList.toggle("hidden", !t);
+    $("r-source-text").textContent = t;
   }
 
   /* ---------- 보관함 ---------- */

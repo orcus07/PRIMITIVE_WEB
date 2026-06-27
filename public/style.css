@@ -191,6 +191,15 @@ blockquote {
   font-size: 13.5px; color: #334155; line-height: 1.6;
   font-family: "Georgia", "Times New Roman", serif;
 }
+/* 원문 전문 — 길어서 내부 스크롤 */
+.source-text {
+  margin: 6px 0 0; padding: 12px 14px;
+  background: var(--accent); border-left: 3px solid var(--border); border-radius: 6px;
+  font-size: 13.5px; color: #334155; line-height: 1.65;
+  font-family: "Georgia", "Times New Roman", serif;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 460px; overflow-y: auto;
+}
 dl { margin: 0; }
 dt { font-weight: 600; margin-top: 8px; }
 dd { margin: 0 0 0 0; color: var(--muted); }
