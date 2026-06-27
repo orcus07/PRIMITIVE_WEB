@@ -191,6 +191,19 @@ blockquote {
   font-size: 13.5px; color: #334155; line-height: 1.6;
   font-family: "Georgia", "Times New Roman", serif;
 }
+/* 전문 한글 완역 — 문단별 영↔한, 영어는 토글로 표시 */
+#r-fulltrans { max-height: 620px; overflow-y: auto; padding-right: 6px; }
+.seg { margin: 0 0 14px; }
+.seg-ko { margin: 0; white-space: pre-wrap; }
+.seg-en {
+  display: none; margin: 5px 0 0; padding: 6px 10px;
+  border-left: 3px solid var(--border); background: var(--accent); border-radius: 6px;
+  color: #475569; font-family: "Georgia", "Times New Roman", serif; font-size: 13.5px; line-height: 1.55;
+  white-space: pre-wrap;
+}
+#r-fulltrans.show-en .seg-en { display: block; }
+.result h3 .link-btn { font-size: 13px; font-weight: 400; margin-left: 8px; }
+
 /* 원문 전문 — 길어서 내부 스크롤 */
 .source-text {
   margin: 6px 0 0; padding: 12px 14px;

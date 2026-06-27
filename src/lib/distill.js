@@ -308,6 +308,113 @@ export async function distillPdf(base64, { filename = "문서", onProgress, pers
   ], onProgress, perspective);
 }
 
+// ──────────────────────────────────────────────────────────────
+// 전문(全文) 한글 완역 — 원문을 토막 내 문단별로 번역해 이어붙인다.
+// 한 번에 다 번역하면 출력 한도(64K)에 잘리므로 청크로 나눠 여러 번 호출한다.
+// 결과는 [{ en, ko }] 세그먼트 배열(문단별 영↔한 정렬)이라 영어 토글 대조가 된다.
+// ──────────────────────────────────────────────────────────────
+const TRANSLATE_SCHEMA = {
+  type: "object",
+  properties: { translations: { type: "array", items: { type: "string" } } },
+  required: ["translations"],
+  additionalProperties: false,
+};
+
+function buildTranslateSystem(perspective) {
+  const lens = (perspective || "").trim() || DEFAULT_PERSPECTIVE;
+  return `너는 영어를 자연스러운 한국어로 옮기는 전문 번역가다. 독자는 다음 관점을 가진 사람이다 — ${lens}.
+
+번역 원칙:
+- 원문의 의미·뉘앙스에 충실하되, 영어 구조를 직역하지 말고 한국어다운 어순·표현으로 다시 쓴다(번역투 금지).
+- 무생물 주어(물주구문) 회피, '~의' 남발·명사문 줄이기, 불필요한 피동·이중피동·'것'·복수 '-들'·겹말 제거, 문장은 짧게, '~다' 평서체. 정확성이 우선이고 그 안에서 가장 한국어다운 표현을 고른다.
+- 원문에 없는 내용을 지어내지 않는다.
+
+출력 형식(엄수):
+- 입력으로 [1] [2] … 번호가 붙은 영어 문단들이 주어진다.
+- 각 문단을 번역해, 입력과 "정확히 같은 개수"의 translations 배열로 순서대로 1:1 반환한다.
+- 문단을 합치거나 나누지 말고, 번호 표시는 빼고 번역문만 담는다.`;
+}
+
+// 원문을 표시·정렬 단위인 세그먼트(문단)로 나눈다.
+function splitSegments(text) {
+  const blocks = String(text || "").replace(/\r/g, "").split(/\n\s*\n+/);
+  const segs = [];
+  for (let b of blocks) {
+    b = b.replace(/\n+/g, " ").trim(); // 문단 내 하드랩(줄바꿈) 합치기 (PDF 대응)
+    if (!b) continue;
+    if (b.length <= 1500) { segs.push(b); continue; }
+    let cur = "";
+    for (const sent of b.split(/(?<=[.!?。])\s+/)) {
+      if (cur && (cur + " " + sent).length > 1000) { segs.push(cur.trim()); cur = sent; }
+      else cur = cur ? cur + " " + sent : sent;
+    }
+    if (cur.trim()) segs.push(cur.trim());
+  }
+  return segs;
+}
+
+// 세그먼트들을 API 호출당 글자수 상한(cap) 이하로 묶는다.
+function groupChunks(segs, cap) {
+  const chunks = []; let cur = []; let len = 0;
+  for (const s of segs) {
+    if (cur.length && len + s.length > cap) { chunks.push(cur); cur = []; len = 0; }
+    cur.push(s); len += s.length;
+  }
+  if (cur.length) chunks.push(cur);
+  return chunks;
+}
+
+// 한 청크(영어 문단들)를 번역해 같은 길이의 한글 배열로 반환.
+async function runTranslateChunk(paragraphs, perspective) {
+  const numbered = paragraphs.map((p, i) => `[${i + 1}] ${p}`).join("\n\n");
+  const params = {
+    model: MODEL,
+    max_tokens: 64000,
+    system: buildTranslateSystem(perspective),
+    output_config: { effort: "medium", format: { type: "json_schema", schema: TRANSLATE_SCHEMA } },
+    messages: [{
+      role: "user",
+      content: `아래 ${paragraphs.length}개의 영어 문단을 자연스러운 한국어로 번역해줘. 입력과 정확히 같은 ${paragraphs.length}개로, 순서대로 1:1 대응하는 translations 배열로만 반환해.\n\n---\n${numbered}`,
+    }],
+  };
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const stream = client().messages.stream(params);
+      const message = await stream.finalMessage();
+      if (message.stop_reason === "max_tokens") {
+        const e = new Error("번역 구간이 출력 한도를 넘었어요."); e.noRetry = true; throw e;
+      }
+      const block = message.content.find((b) => b.type === "text");
+      if (!block) throw new Error("번역 응답이 비어 있어요.");
+      const arr = JSON.parse(block.text).translations;
+      return Array.isArray(arr) ? arr : [];
+    } catch (err) {
+      lastErr = err;
+      if (err.noRetry || !isTransient(err)) throw err;
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt));
+    }
+  }
+  throw lastErr;
+}
+
+const TRANSLATE_CHUNK_CHARS = 30000; // 청크당 영어 글자수(출력 한도 안전 범위)
+
+export async function translateFull(text, { onProgress = () => {}, perspective = "" } = {}) {
+  const segs = splitSegments(text);
+  if (!segs.length) throw new Error("번역할 원문 텍스트가 없어요.");
+  const chunks = groupChunks(segs, TRANSLATE_CHUNK_CHARS);
+  const out = [];
+  for (let i = 0; i < chunks.length; i++) {
+    onProgress(`전문 한글 번역 중… (${i + 1}/${chunks.length} 구간)`);
+    const ko = await runTranslateChunk(chunks[i], perspective);
+    const en = chunks[i];
+    for (let j = 0; j < en.length; j++) out.push({ en: en[j], ko: ko[j] != null ? ko[j] : "" });
+  }
+  onProgress("✓ 전문 번역 완료");
+  return out;
+}
+
 // 독자가 읽은 글 목록(제목·요약·주제)만 보고 "이 독자는 누구인가"를 한 문단으로
 // 추론한다. 결과는 그대로 독자 관점(렌즈)으로 쓰인다. 입력이 작아 비용이 매우 싸다.
 const PROFILE_SYSTEM = `너는 한 독자의 '읽은 글 목록'만 보고 그 사람을 추론해 한 문단으로 정의하는 분석가다.
