@@ -82,17 +82,23 @@
     catch { return []; }
   }
   function persist() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(records)); return; } catch {}
+    // 1차: 영어 원문 전문 제거(완역이 있으면 그 안에 영어가 들어 있어 중복).
     try {
+      records = records.map((r) =>
+        (r.fullTranslation && r.fullTranslation.length)
+          ? (() => { const c = { ...r }; delete c.sourceText; return c; })()
+          : r);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-    } catch (e) {
-      // 용량 초과 — 가장 큰 항목(원문 전문)을 떼고 재시도. 현재 화면 표시는 영향 없음.
-      try {
-        records = records.map((r) => { const c = { ...r }; delete c.sourceText; return c; });
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-        alert("보관 용량이 가득 차 '원문 전문'은 저장하지 못했어요. (지금 화면에서는 볼 수 있어요)");
-      } catch {
-        alert("브라우저 보관 용량이 가득 찼어요. 보관함에서 오래된 글을 삭제해 주세요.");
-      }
+      return;
+    } catch {}
+    // 2차: 원문·완역 본문 모두 제거.
+    try {
+      records = records.map((r) => { const c = { ...r }; delete c.sourceText; delete c.fullTranslation; return c; });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+      alert("보관 용량이 가득 차 원문·완역 본문은 저장하지 못했어요. (지금 화면에서는 볼 수 있어요)");
+    } catch {
+      alert("브라우저 보관 용량이 가득 찼어요. 보관함에서 오래된 글을 삭제해 주세요.");
     }
   }
 
@@ -174,7 +180,9 @@
   }
 
   // jobId 폴링. 백그라운드 복귀 시 일시적 네트워크 오류는 재시도로 흡수.
-  async function pollJob(jobId) {
+  // isOk(result): 결과 유효성 검사(기본은 증류 결과 기준). 번역 등 다른 작업은 따로 전달.
+  async function pollJob(jobId, isOk) {
+    const valid = isOk || resultIsOk;
     let shown = 0, netErrors = 0;
     for (;;) {
       let res, data;
@@ -191,7 +199,7 @@
       const steps = data.steps || [];
       for (; shown < steps.length; shown++) logStepMs(steps[shown].ms, steps[shown].msg);
       if (data.status === "done") {
-        if (!resultIsOk(data.result)) throw new Error("결과가 비어 있어요. 새로고침 후 다시 시도해주세요.");
+        if (!valid(data.result)) throw new Error("결과가 비어 있어요. 새로고침 후 다시 시도해주세요.");
         return data.result;
       }
       if (data.status === "error") throw new Error(data.error || "처리 중 오류가 발생했습니다.");
@@ -315,7 +323,8 @@
     renderQuotes(r.keyQuotes);
     renderSections(r.sections);
     renderTerms(r.keyTerms);
-    renderSourceText(r.sourceText);
+    renderFullTranslation(r);
+    renderSourceText(r);
 
     const link = $("r-link");
     if (r.url) { link.href = r.url; link.classList.remove("hidden"); }
@@ -411,11 +420,65 @@
       dl.append(dt, dd);
     });
   }
-  // 원문 전문(서버 추출). 있으면 접이식으로 표시, 없으면(스캔본 등) 숨김.
-  function renderSourceText(s) {
-    const t = (s || "").trim();
-    $("r-source-wrap").classList.toggle("hidden", !t);
+  // 원문 전문(서버 추출, 영어). 완역이 있으면 그 안에 영어가 들어가므로 숨긴다.
+  function renderSourceText(r) {
+    const t = (r.sourceText || "").trim();
+    const hasFull = !!(r.fullTranslation && r.fullTranslation.length);
+    $("r-source-wrap").classList.toggle("hidden", !t || hasFull);
     $("r-source-text").textContent = t;
+    // 완역 버튼: 원문이 있고 아직 완역 안 했을 때만
+    $("r-translate-actions").classList.toggle("hidden", !t || hasFull);
+  }
+
+  // 전문 한글 완역(문단별 영↔한). 영어 토글로 대조 읽기.
+  let enVisible = false;
+  function renderFullTranslation(r) {
+    const segs = r.fullTranslation;
+    const wrap = $("r-fulltrans-wrap");
+    if (!segs || !segs.length) { wrap.classList.add("hidden"); return; }
+    wrap.classList.remove("hidden");
+    const box = $("r-fulltrans"); box.innerHTML = "";
+    segs.forEach((s) => {
+      const div = document.createElement("div"); div.className = "seg";
+      const ko = document.createElement("p"); ko.className = "seg-ko"; ko.textContent = s.ko || "";
+      const en = document.createElement("p"); en.className = "seg-en"; en.textContent = s.en || "";
+      div.append(ko, en); box.appendChild(div);
+    });
+    box.classList.toggle("show-en", enVisible);
+    $("toggle-en").textContent = enVisible ? "🇰🇷 한글만 보기" : "🇬🇧 영어 원문 함께 보기";
+  }
+
+  // 완역 예상 비용(거친 추정). Sonnet 4.6: 입력 $3 / 출력 $15 per 1M.
+  function estimateTranslateUsd(chars) {
+    const inTok = chars / 4;
+    const outTok = (chars / 4) * 1.15; // 한글 번역 출력
+    return (inTok * 3 + outTok * 15) / 1e6;
+  }
+
+  // 버튼: 원문 전체를 한글로 완역(백그라운드 작업). pending 저장 안 함(증류 이어보기와 구분).
+  async function makeFullTranslation() {
+    const r = records.find((x) => x.id === currentId);
+    if (!r) return;
+    const src = (r.sourceText || "").trim();
+    if (!src) { alert("원문 텍스트가 없어요(스캔본 PDF 등은 완역 불가)."); return; }
+    const est = estimateTranslateUsd(src.length);
+    if (!confirm(`원문 ${src.length.toLocaleString()}자를 한글로 완역할까요?\n예상 비용 약 $${est.toFixed(2)} · 분량에 따라 시간이 걸려요(백그라운드 진행).`)) return;
+    busy(true);
+    $("translate-btn").disabled = true;
+    try {
+      const jobId = await submitJob("/api/translate", { text: src, perspective: getPerspective() });
+      const result = await pollJob(jobId, (d) => d && Array.isArray(d.segments) && d.segments.length);
+      r.fullTranslation = result.segments;
+      persist();
+      logStep("🎉 전문 번역 완료");
+      show(r);
+    } catch (err) {
+      logStep("❌ " + err.message);
+      alert(err.message);
+    } finally {
+      busy(false);
+      $("translate-btn").disabled = false;
+    }
   }
 
   /* ---------- 보관함 ---------- */
@@ -477,6 +540,14 @@
     $("pdf-box").classList.toggle("hidden"));
   $("delete-btn").addEventListener("click", removeCurrent);
   $("search").addEventListener("input", renderList);
+
+  // 전문 완역 버튼 + 영어 원문 토글
+  $("translate-btn").addEventListener("click", makeFullTranslation);
+  $("toggle-en").addEventListener("click", () => {
+    enVisible = !enVisible;
+    $("r-fulltrans").classList.toggle("show-en", enVisible);
+    $("toggle-en").textContent = enVisible ? "🇰🇷 한글만 보기" : "🇬🇧 영어 원문 함께 보기";
+  });
 
   // 읽은 글 목록 접기/펴기 (모바일에선 기본 접힘 — 입력·결과가 바로 보이도록)
   const LIST_KEY = "reader-list-collapsed/v1";

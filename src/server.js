@@ -9,7 +9,7 @@ import { PDFDocument } from "pdf-lib";
 import { PDFParse } from "pdf-parse";
 
 import { fetchArticle } from "./lib/fetchArticle.js";
-import { distillArticle, distillPdf, estimateCostUsd, MODEL_LABEL, inferReaderProfile } from "./lib/distill.js";
+import { distillArticle, distillPdf, estimateCostUsd, MODEL_LABEL, inferReaderProfile, translateFull } from "./lib/distill.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -189,6 +189,19 @@ app.post("/api/digest-pdf", (req, res) => {
     const sourceText = capSource(await extractPdfText(base64));
     const result = await distillPdf(base64, { filename, onProgress, perspective, condensed, pages });
     return { url, via: "pdf", ...result, perspective, sourceText };
+  });
+  res.json({ jobId: job.id });
+});
+
+// 원문 전체를 한글로 완역(문단별 영↔한 정렬). 분량 비례라 백그라운드 작업.
+app.post("/api/translate", (req, res) => {
+  const { text, perspective = "" } = req.body || {};
+  if (!text || text.trim().length < 50) {
+    return res.status(400).json({ error: "번역할 원문이 너무 짧습니다." });
+  }
+  const job = startJob(async (onProgress) => {
+    const segments = await translateFull(text, { onProgress, perspective });
+    return { segments };
   });
   res.json({ jobId: job.id });
 });
