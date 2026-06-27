@@ -284,7 +284,12 @@ export async function distillArticle(text, { url = "", sourceTitle = "", onProgr
 }
 
 // PDF(논문·보고서 등)를 Claude가 직접 읽어 정리한다.
-export async function distillPdf(base64, { filename = "문서", onProgress, perspective = "" } = {}) {
+// condensed=true(쪽수 많은 문서)면 출력 한도(64K)에 잘리지 않도록 "전체를 빠짐없이
+// 다루되 핵심 위주로 압축"하라고 지시한다.
+export async function distillPdf(base64, { filename = "문서", onProgress, perspective = "", condensed = false, pages = 0 } = {}) {
+  const longNote = condensed
+    ? `\n\n이 문서는 ${pages ? `${pages}쪽으로 ` : ""}매우 길다. 출력이 중간에 잘리지 않도록, 문서를 처음부터 끝까지 빠짐없이 다루되 핵심 논지·근거·숫자·결론 위주로 압축해 구조화하라. 덜 중요한 세부·반복은 과감히 요약한다. section의 original(원문 발췌)도 길면 핵심 문장만 짧게 담는다.`
+    : "";
   return runStructured([
     {
       role: "user",
@@ -296,7 +301,7 @@ export async function distillPdf(base64, { filename = "문서", onProgress, pers
         },
         {
           type: "text",
-          text: `이 PDF 문서("${filename}")를 위 원칙에 따라 한글로 번역·구조화·증류해줘.`,
+          text: `이 PDF 문서("${filename}")를 위 원칙에 따라 한글로 번역·구조화·증류해줘.${longNote}`,
         },
       ],
     },

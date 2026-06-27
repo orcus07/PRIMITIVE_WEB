@@ -253,7 +253,7 @@
   async function digestPdf() {
     const file = $("pdf-file").files && $("pdf-file").files[0];
     if (!file) return alert("PDF 파일을 선택하세요.");
-    if (file.size > 22 * 1024 * 1024) return alert("PDF가 너무 큽니다. ~20MB 이하로 올려주세요.");
+    if (file.size > 22 * 1024 * 1024) return alert("PDF 용량이 너무 큽니다. ~22MB 이하로 올려주세요. (쪽수가 많아도 용량만 작으면 OK)");
     busy(true);
     try {
       logStep(`PDF 읽는 중: ${file.name} (${(file.size / 1048576).toFixed(1)}MB)`);
