@@ -5,11 +5,27 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 
+import { PDFDocument } from "pdf-lib";
+
 import { fetchArticle } from "./lib/fetchArticle.js";
 import { distillArticle, distillPdf, estimateCostUsd, MODEL_LABEL, inferReaderProfile } from "./lib/distill.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
+
+// PDF 분량 기준: LONG_PAGES 초과면 압축 모드, MAX_PDF_PAGES 초과면 거부(API 한도 600쪽).
+const LONG_PAGES = 40;
+const MAX_PDF_PAGES = 580;
+// base64 PDF의 쪽수를 센다. 실패(암호화·손상 등)하면 0(=알 수 없음) 반환.
+async function pdfPageCount(base64) {
+  try {
+    const buf = Buffer.from(base64, "base64");
+    const doc = await PDFDocument.load(buf, { updateMetadata: false, ignoreEncryption: true });
+    return doc.getPageCount();
+  } catch {
+    return 0;
+  }
+}
 
 // 긴 글이면 시작 시점에 예상 비용을 로그로 알려준다(경고 표시).
 const LONG_CHARS = 40000;
@@ -21,7 +37,7 @@ function warnIfLong(onProgress, chars) {
 }
 
 const app = express();
-app.use(express.json({ limit: "30mb" })); // PDF base64 수용
+app.use(express.json({ limit: "40mb" })); // PDF base64 수용 (~22MB 파일 → base64 ~29MB + 여유)
 
 // HTML은 절대 캐시하지 않는다(브라우저가 옛 index.html을 붙들고 ?v= 자산을
 // 영영 못 받는 문제 방지). 나머지 정적 자산은 ?v= 쿼리로 캐시를 무력화한다.
@@ -133,11 +149,21 @@ app.post("/api/digest-pdf", (req, res) => {
     return res.status(400).json({ error: "PDF 데이터가 비어 있습니다." });
   }
   const job = startJob(async (onProgress) => {
-    onProgress(`PDF "${filename}" 업로드됨 — Claude가 직접 읽는 중`);
-    if (base64.length > 2_000_000) { // ~1.5MB 이상 → 분량 큼
+    const pages = await pdfPageCount(base64); // 0 = 알 수 없음(암호화 등)
+    const condensed = pages > LONG_PAGES;
+    onProgress(`PDF "${filename}"${pages ? ` (${pages}쪽)` : ""} 업로드됨 — Claude가 직접 읽는 중`);
+    if (pages > MAX_PDF_PAGES) {
+      throw Object.assign(
+        new Error(`PDF가 ${pages}쪽이라 한 번에 처리할 수 있는 한도(${MAX_PDF_PAGES}쪽)를 넘어요. 필요한 부분만 나눠서 올려주세요.`),
+        { noRetry: true }
+      );
+    }
+    if (condensed) {
+      onProgress(`⚠️ 긴 PDF(${pages}쪽) — 전체를 다루되 핵심 위주로 압축 정리합니다 (출력 한도 대응). 모델: ${MODEL_LABEL}`);
+    } else if (base64.length > 2_000_000) {
       onProgress(`⚠️ 분량이 큰 PDF — 쪽수가 많으면 비용이 더 들 수 있어요 (모델: ${MODEL_LABEL})`);
     }
-    const result = await distillPdf(base64, { filename, onProgress, perspective });
+    const result = await distillPdf(base64, { filename, onProgress, perspective, condensed, pages });
     return { url, via: "pdf", ...result, perspective };
   });
   res.json({ jobId: job.id });
