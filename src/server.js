@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 
 import { PDFDocument } from "pdf-lib";
+import { PDFParse } from "pdf-parse";
 
 import { fetchArticle } from "./lib/fetchArticle.js";
 import { distillArticle, distillPdf, estimateCostUsd, MODEL_LABEL, inferReaderProfile } from "./lib/distill.js";
@@ -25,6 +26,27 @@ async function pdfPageCount(base64) {
   } catch {
     return 0;
   }
+}
+
+// base64 PDF에서 원문 텍스트층을 추출한다. 스캔본(이미지)·암호화는 빈 문자열.
+async function extractPdfText(base64) {
+  try {
+    const buf = Buffer.from(base64, "base64");
+    const parser = new PDFParse({ data: new Uint8Array(buf) });
+    const r = await parser.getText();
+    if (parser.destroy) await parser.destroy();
+    return (r.text || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+// 원문 전문은 localStorage에 저장되므로 너무 크지 않게 상한을 둔다.
+const SOURCE_CAP = 500000;
+function capSource(s) {
+  s = (s || "").trim();
+  if (s.length <= SOURCE_CAP) return s;
+  return s.slice(0, SOURCE_CAP) + "\n\n…(원문이 매우 길어 앞부분만 보관했습니다)";
 }
 
 // 긴 글이면 시작 시점에 예상 비용을 로그로 알려준다(경고 표시).
@@ -122,7 +144,7 @@ app.post("/api/digest", (req, res) => {
     const result = await distillArticle(fetched.text, {
       url: srcUrl, sourceTitle: fetched.title, onProgress, perspective,
     });
-    return { url: srcUrl, via: fetched.via, ...result, perspective };
+    return { url: srcUrl, via: fetched.via, ...result, perspective, sourceText: capSource(fetched.text) };
   });
   res.json({ jobId: job.id });
 });
@@ -137,7 +159,7 @@ app.post("/api/digest-text", (req, res) => {
     onProgress(`붙여넣은 본문 ${text.trim().length.toLocaleString()}자 — 증류 시작`);
     warnIfLong(onProgress, text.trim().length);
     const result = await distillArticle(text.trim(), { url, sourceTitle: title, onProgress, perspective });
-    return { url, via: "paste", ...result, perspective };
+    return { url, via: "paste", ...result, perspective, sourceText: capSource(text.trim()) };
   });
   res.json({ jobId: job.id });
 });
@@ -163,8 +185,10 @@ app.post("/api/digest-pdf", (req, res) => {
     } else if (base64.length > 2_000_000) {
       onProgress(`⚠️ 분량이 큰 PDF — 쪽수가 많으면 비용이 더 들 수 있어요 (모델: ${MODEL_LABEL})`);
     }
+    onProgress("원문 텍스트 추출 중…");
+    const sourceText = capSource(await extractPdfText(base64));
     const result = await distillPdf(base64, { filename, onProgress, perspective, condensed, pages });
-    return { url, via: "pdf", ...result, perspective };
+    return { url, via: "pdf", ...result, perspective, sourceText };
   });
   res.json({ jobId: job.id });
 });
