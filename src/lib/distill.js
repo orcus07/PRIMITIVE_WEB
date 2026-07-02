@@ -1,15 +1,16 @@
-// 영문 본문을 받아 한글로 번역·구조화·증류한다. (Claude claude-sonnet-4-6)
+// 영문 본문을 받아 한글로 번역·구조화·증류한다. (Claude claude-sonnet-5)
 // 독자 관점(렌즈)은 사용자가 주입할 수 있고, 비우면 기본값(반도체 마케터·AI 동향)을 쓴다.
 // 무관한 글까지 억지로 그 관점에 끼워 맞추지 않도록 — 연관도를 정직하게 표시한다.
 import Anthropic from "@anthropic-ai/sdk";
 import https from "node:https";
 import { Readable } from "node:stream";
 
-// 번역·구조화는 Opus까지 안 가도 품질이 충분하고, Sonnet은 출력이 40% 저렴하다
-// ($25→$15/1M). 비용을 크게 줄이려고 Sonnet 4.6을 기본으로 쓴다.
-const MODEL = "claude-sonnet-4-6";
-export const MODEL_LABEL = "Sonnet 4.6"; // 화면 표시용
-const RATE_IN = 3, RATE_OUT = 15; // $/1M (Sonnet 4.6)
+// 번역·구조화는 Opus까지 안 가도 품질이 충분하다. Sonnet 5는 4.6 후속이면서 정가가
+// 동일($3/$15 per 1M)이고, 2026-08-31까지 도입가($2/$10)로 오히려 더 싸다.
+// API 표면(adaptive thinking·구조화 출력·스트리밍)도 동일해 모델 ID만 교체하면 된다.
+const MODEL = "claude-sonnet-5";
+export const MODEL_LABEL = "Sonnet 5"; // 화면 표시용
+const RATE_IN = 3, RATE_OUT = 15; // $/1M (정가 기준. 도입가는 더 저렴 → 추정이 보수적)
 
 // 입력 글자수로 변환 비용을 대략 추정한다(아주 거친 추정 — 경고 표시용).
 export function estimateCostUsd(chars) {

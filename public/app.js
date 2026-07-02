@@ -448,7 +448,7 @@
     $("toggle-en").textContent = enVisible ? "🇰🇷 한글만 보기" : "🇬🇧 영어 원문 함께 보기";
   }
 
-  // 완역 예상 비용(거친 추정). Sonnet 4.6: 입력 $3 / 출력 $15 per 1M.
+  // 완역 예상 비용(거친 추정). Sonnet 5 정가: 입력 $3 / 출력 $15 per 1M.
   function estimateTranslateUsd(chars) {
     const inTok = chars / 4;
     const outTok = (chars / 4) * 1.15; // 한글 번역 출력
