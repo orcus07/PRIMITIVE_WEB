@@ -18,6 +18,8 @@ const LABEL = {
   tryDirect: "직접 수집",
   tryProxy: "프록시(Jina) 우회",
   tryTweetFx: "fxtwitter API",
+  tryTweetVx: "vxtwitter API",
+  tryTweetSyndication: "X 임베드 API",
   tryTweetOembed: "트위터 oEmbed",
 };
 const labelOf = (fn) => LABEL[fn.name] || fn.name;
@@ -101,7 +103,44 @@ async function tryTweetFx(url) {
   return { title: `${name} (@${handle}) 트윗`, text, via: "tweet", handle: `@${handle}` };
 }
 
-// 2순위: 공식 oEmbed (첫 트윗 텍스트)
+// 2순위: vxtwitter 공개 API — fxtwitter와 별개 인프라라 한쪽이 막혀도 교차 보완
+async function tryTweetVx(url) {
+  const id = url.match(TWEET_RE)[2];
+  const res = await fetch(`https://api.vxtwitter.com/i/status/${id}`, { headers: BROWSER_HEADERS });
+  if (!res.ok) throw new Error(`tweet-vx ${res.status}`);
+  const data = await res.json();
+  if (!data || !data.text) throw new Error("tweet-vx empty");
+  let text = data.text;
+  if (data.qrt && data.qrt.text) {
+    text += `\n\n[인용한 트윗 - @${data.qrt.user_screen_name || ""}]\n${data.qrt.text}`;
+  }
+  const handle = data.user_screen_name || url.match(TWEET_RE)[1];
+  const name = data.user_name || handle;
+  return { title: `${name} (@${handle}) 트윗`, text, via: "tweet", handle: `@${handle}` };
+}
+
+// 3순위: X 공식 임베드(신디케이션) API — 위젯이 쓰는 경로라 인증 없이 트윗 JSON을 준다.
+// 토큰은 위젯과 같은 공개 규칙으로 계산한다.
+function syndicationToken(id) {
+  return ((Number(id) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, "");
+}
+async function tryTweetSyndication(url) {
+  const id = url.match(TWEET_RE)[2];
+  const api = `https://cdn.syndication.twimg.com/tweet-result?id=${id}&lang=en&token=${syndicationToken(id)}`;
+  const res = await fetch(api, { headers: BROWSER_HEADERS });
+  if (!res.ok) throw new Error(`tweet-synd ${res.status}`);
+  const data = await res.json();
+  if (!data || data.__typename === "TweetTombstone" || !data.text) throw new Error("tweet-synd empty");
+  let text = data.text;
+  if (data.quoted_tweet && data.quoted_tweet.text) {
+    text += `\n\n[인용한 트윗 - @${(data.quoted_tweet.user && data.quoted_tweet.user.screen_name) || ""}]\n${data.quoted_tweet.text}`;
+  }
+  const handle = (data.user && data.user.screen_name) || url.match(TWEET_RE)[1];
+  const name = (data.user && data.user.name) || handle;
+  return { title: `${name} (@${handle}) 트윗`, text, via: "tweet", handle: `@${handle}` };
+}
+
+// 4순위: 공식 oEmbed (첫 트윗 텍스트)
 async function tryTweetOembed(url) {
   const api = `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&omit_script=true&dnt=true`;
   const res = await fetch(api, { headers: BROWSER_HEADERS });
@@ -157,7 +196,7 @@ async function fetchLinkedArticle(u, onProgress = () => {}) {
 async function fetchTweet(url, onProgress = () => {}) {
   const errors = [];
   let tweet;
-  for (const s of [tryTweetFx, tryTweetOembed, tryProxy]) {
+  for (const s of [tryTweetFx, tryTweetVx, tryTweetSyndication, tryTweetOembed, tryProxy]) {
     onProgress(`트윗 ${labelOf(s)} 시도…`);
     try {
       const r = await s(url);
