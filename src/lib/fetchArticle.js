@@ -160,7 +160,7 @@ async function tryTweetFx(url) {
   }
   const handle = (t.author && t.author.screen_name) || url.match(TWEET_RE)[1];
   const name = (t.author && t.author.name) || handle;
-  return { title: `${name} (@${handle}) 트윗`, text, via: "tweet", handle: `@${handle}` };
+  return { title: `${name} (@${handle}) 트윗`, text, via: "tweet", handle: `@${handle}`, article: t.article || null };
 }
 
 // 2순위: vxtwitter 공개 API — fxtwitter와 별개 인프라라 한쪽이 막혀도 교차 보완
@@ -180,7 +180,7 @@ async function tryTweetVx(url) {
   }
   const handle = data.user_screen_name || url.match(TWEET_RE)[1];
   const name = data.user_name || handle;
-  return { title: `${name} (@${handle}) 트윗`, text, via: "tweet", handle: `@${handle}` };
+  return { title: `${name} (@${handle}) 트윗`, text, via: "tweet", handle: `@${handle}`, article: data.article || null };
 }
 
 // 3순위: X 공식 임베드(신디케이션) API — 위젯이 쓰는 경로라 인증 없이 트윗 JSON을 준다.
@@ -194,14 +194,18 @@ async function tryTweetSyndication(url) {
   const res = await fetch(api, { headers: BROWSER_HEADERS });
   if (!res.ok) throw new Error(`tweet-synd ${res.status}`);
   const data = await res.json();
-  if (!data || data.__typename === "TweetTombstone" || !data.text) throw new Error("tweet-synd empty");
-  let text = data.text;
+  const artText = data ? articleToText(data.article) : "";
+  if (!data || data.__typename === "TweetTombstone" || (!data.text && !artText)) throw new Error("tweet-synd empty");
+  let text = data.text || "";
   if (data.quoted_tweet && data.quoted_tweet.text) {
     text += `\n\n[인용한 트윗 - @${(data.quoted_tweet.user && data.quoted_tweet.user.screen_name) || ""}]\n${data.quoted_tweet.text}`;
   }
+  if (artText && !text.includes(artText)) {
+    text = text ? `${text}\n\n[첨부된 X 아티클]\n${artText}` : artText;
+  }
   const handle = (data.user && data.user.screen_name) || url.match(TWEET_RE)[1];
   const name = (data.user && data.user.name) || handle;
-  return { title: `${name} (@${handle}) 트윗`, text, via: "tweet", handle: `@${handle}` };
+  return { title: `${name} (@${handle}) 트윗`, text, via: "tweet", handle: `@${handle}`, article: data.article || null };
 }
 
 // 4순위: 공식 oEmbed (첫 트윗 텍스트)
@@ -310,14 +314,16 @@ async function fetchTweet(url, onProgress = () => {}) {
           url: shared,
         };
       }
-      // 아티클 전문 실패. 코멘트/미리보기가 의미 있게 있으면 그걸로 정직하게 폴백.
+      // 아티클 전문 실패. X가 비로그인에 공개하는 건 제목+미리보기까지라,
+      // 코멘트/미리보기가 의미 있게 있으면 그걸로 정직하게 폴백.
       if (textNoUrls.length >= 30) {
-        onProgress("✗ 아티클 전문 수집 실패 — 트윗 코멘트(미리보기)로 폴백");
+        onProgress("✗ 아티클 전문 수집 실패(X가 미리보기까지만 공개) — 제목·미리보기로 폴백");
         return {
-          title: tweet.title,
+          title: (tweet.article && tweet.article.title) || tweet.title,
           text:
-            `[참고: 이 트윗이 공유한 X 아티클(${shared})의 전문은 로그인 장벽으로 ` +
-            `자동 수집하지 못했습니다. 아래는 트윗 코멘트와 미리보기까지입니다.]\n\n${tweet.text}`,
+            `[참고: 이 트윗이 공유한 X 아티클(${shared})의 전문은 X가 로그인 사용자에게만 ` +
+            `공개해 자동 수집하지 못했습니다. 아래는 공개된 제목·미리보기와 트윗 코멘트입니다. ` +
+            `전문이 필요하면 아티클을 열어 복사한 뒤 "본문 붙여넣기"를 쓰세요.]\n\n${tweet.text}`,
           via: "tweet",
           url: shared,
         };
