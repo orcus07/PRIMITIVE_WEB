@@ -290,26 +290,48 @@ async function fetchTweet(url, onProgress = () => {}) {
   const urls = (tweet.text.match(/https?:\/\/[^\s]+/g) || []).map(cleanUrl);
   const textNoUrls = tweet.text.replace(/https?:\/\/[^\s]+/g, "").replace(/\s+/g, " ").trim();
 
-  // 텍스트가 짧고 링크가 있으면 = 링크 공유 트윗 → 그 링크 본문을 읽는다.
-  if (urls.length && textNoUrls.length < 200) {
-    onProgress(`링크 공유 트윗 감지 — 단축 링크 펼치는 중…`);
+  // 링크 공유 트윗 처리.
+  // - X 아티클: 코멘트 길이와 무관하게 전문 수집을 시도한다.
+  //   (코멘트가 길다고 건너뛰면 아티클 미리보기만 증류되는 문제)
+  // - 일반 링크: 코멘트가 짧을 때(=링크 공유가 목적인 트윗)만 본문을 따라간다.
+  if (urls.length) {
     const shared = await resolveUrl(urls[urls.length - 1]);
-    if (!isTweet(shared) && /^https?:\/\//i.test(shared)) {
-      onProgress(`공유 링크 목적지: ${shared}`);
-      const who = tweet.handle || "트윗";
-      // 공유 링크가 X 아티클(장문 글)이면 미러 API로 본문을 먼저 시도한다.
-      if (isXArticle(shared)) {
-        onProgress("공유 링크가 X 아티클(장문 글) — 미러 API로 본문 수집 시도");
-        const xa = await tryXArticle(shared, onProgress);
-        if (xa) {
-          return {
-            title: xa.title || tweet.title,
-            text: `[${who} 가 공유한 X 아티클: ${shared}]\n\n${xa.text}`,
-            via: "tweet",
-            url: shared,
-          };
-        }
+    const who = tweet.handle || "트윗";
+
+    if (isXArticle(shared)) {
+      onProgress(`공유 링크가 X 아티클(장문 글): ${shared} — 전문 수집 시도`);
+      const xa = await tryXArticle(shared, onProgress);
+      if (xa) {
+        const comment = textNoUrls.length >= 30 ? `[${who} 코멘트]\n${textNoUrls}\n\n` : "";
+        return {
+          title: xa.title || tweet.title,
+          text: `${comment}[공유된 X 아티클: ${shared}]\n\n${xa.text}`,
+          via: "tweet",
+          url: shared,
+        };
       }
+      // 아티클 전문 실패. 코멘트/미리보기가 의미 있게 있으면 그걸로 정직하게 폴백.
+      if (textNoUrls.length >= 30) {
+        onProgress("✗ 아티클 전문 수집 실패 — 트윗 코멘트(미리보기)로 폴백");
+        return {
+          title: tweet.title,
+          text:
+            `[참고: 이 트윗이 공유한 X 아티클(${shared})의 전문은 로그인 장벽으로 ` +
+            `자동 수집하지 못했습니다. 아래는 트윗 코멘트와 미리보기까지입니다.]\n\n${tweet.text}`,
+          via: "tweet",
+          url: shared,
+        };
+      }
+      throw new Error(
+        `이 트윗이 공유한 건 X 아티클(프리미엄 장문 글)이에요. 로그인 장벽에 막혀 ` +
+          `우회 경로까지 모두 실패해 본문을 자동으로 가져오지 못했습니다.\n` +
+          `→ 아티클: ${shared}\n` +
+          `X 앱/웹에서 아티클을 열어 본문을 복사한 뒤 "본문 붙여넣기"(원문 링크 칸에 위 주소)로 넣으면 정확히 정리해드려요.`
+      );
+    }
+
+    if (textNoUrls.length < 200 && !isTweet(shared) && /^https?:\/\//i.test(shared)) {
+      onProgress(`공유 링크 목적지: ${shared}`);
       const art = await fetchLinkedArticle(shared, onProgress);
       if (art && art.text) {
         return {
@@ -334,15 +356,10 @@ async function fetchTweet(url, onProgress = () => {}) {
       }
       // 코멘트도 거의 없는 순수 링크 공유 → 정직하게 붙여넣기 안내.
       throw new Error(
-        isXArticle(shared)
-          ? `이 트윗이 공유한 건 X 아티클(프리미엄 장문 글)이에요. 로그인 장벽에 막혀 ` +
-            `우회 경로까지 모두 실패해 본문을 자동으로 가져오지 못했습니다.\n` +
-            `→ 아티클: ${shared}\n` +
-            `X 앱/웹에서 아티클을 열어 본문을 복사한 뒤 "본문 붙여넣기"(원문 링크 칸에 위 주소)로 넣으면 정확히 정리해드려요.`
-          : `이 트윗은 X(트위터) 안에서 로그인해야 보이는 콘텐츠를 공유한 것 같아요. ` +
-            `공유된 글의 본문을 자동으로 가져오지 못했습니다.\n` +
-            `→ 공유 링크: ${shared}\n` +
-            `이 링크를 열어 본문을 복사한 뒤 "본문 붙여넣기"(원문 링크 칸에 위 주소)로 넣으면 정확히 정리해드려요.`
+        `이 트윗은 X(트위터) 안에서 로그인해야 보이는 콘텐츠를 공유한 것 같아요. ` +
+          `공유된 글의 본문을 자동으로 가져오지 못했습니다.\n` +
+          `→ 공유 링크: ${shared}\n` +
+          `이 링크를 열어 본문을 복사한 뒤 "본문 붙여넣기"(원문 링크 칸에 위 주소)로 넣으면 정확히 정리해드려요.`
       );
     }
   }
