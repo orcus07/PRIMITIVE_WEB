@@ -86,6 +86,61 @@ async function tryProxy(url) {
 const TWEET_RE = /(?:twitter\.com|x\.com)\/([^/?#]+)\/status\/(\d+)/i;
 const isTweet = (url) => TWEET_RE.test(url);
 
+// ── X 아티클(프리미엄 장문 글) ─────────────────────────────────
+// x.com/i/article/<id> 형태. 로그인 장벽 뒤라 일반 수집이 막히므로
+// 트윗 미러 API들이 응답에 실어주는 article 데이터를 최대한 활용한다.
+const ARTICLE_RE = /(?:twitter\.com|x\.com)\/(?:i|[^/?#]+)\/article\/(\d+)/i;
+const isXArticle = (url) => ARTICLE_RE.test(url);
+
+// 미러 API 응답의 article 객체에서 본문 텍스트를 뽑아낸다.
+// API마다 필드가 달라(text / blocks / content_state…) 방어적으로 훑는다.
+function articleToText(a) {
+  if (!a || typeof a !== "object") return "";
+  const fromBlocks = (blocks) =>
+    Array.isArray(blocks)
+      ? blocks.map((b) => (b && (b.text || b.content)) || "").filter(Boolean).join("\n\n")
+      : "";
+  const body =
+    (typeof a.text === "string" && a.text) ||
+    (typeof a.full_text === "string" && a.full_text) ||
+    (typeof a.content === "string" && a.content) ||
+    fromBlocks(a.blocks) ||
+    fromBlocks(a.content_state && a.content_state.blocks) ||
+    "";
+  const parts = [];
+  if (a.title) parts.push(a.title);
+  if (body) parts.push(body);
+  else if (a.preview_text) {
+    parts.push(`${a.preview_text}\n\n…(공개된 건 미리보기까지라 전문은 가져오지 못했습니다)`);
+  }
+  return parts.join("\n\n").trim();
+}
+
+// 아티클 ID를 status로 간주해 미러 API들에 물어본다. 성공 시 { title, text }, 실패 시 null.
+async function tryXArticle(articleUrl, onProgress = () => {}) {
+  const id = articleUrl.match(ARTICLE_RE)[1];
+  const attempts = [
+    ["fxtwitter API", `https://api.fxtwitter.com/status/${id}`, (d) => d && d.tweet],
+    ["vxtwitter API", `https://api.vxtwitter.com/i/status/${id}`, (d) => d],
+  ];
+  for (const [label, api, pick] of attempts) {
+    onProgress(`X 아티클 ${label} 조회…`);
+    try {
+      const res = await fetch(api, { headers: BROWSER_HEADERS });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const t = pick(await res.json());
+      const artText = articleToText(t && t.article);
+      const text = artText || (t && t.text) || "";
+      if (text.length < 250) throw new Error("본문 없음/너무 짧음");
+      onProgress(`✓ X 아티클 본문 확보 (${text.length.toLocaleString()}자)`);
+      return { title: (t.article && t.article.title) || "", text };
+    } catch (e) {
+      onProgress(`✗ X 아티클 ${label} 실패: ${e.message}`);
+    }
+  }
+  return null;
+}
+
 // 1순위: fxtwitter 공개 API (깔끔한 JSON, 인용 트윗까지)
 async function tryTweetFx(url) {
   const id = url.match(TWEET_RE)[2];
@@ -93,10 +148,15 @@ async function tryTweetFx(url) {
   if (!res.ok) throw new Error(`tweet-fx ${res.status}`);
   const data = await res.json();
   const t = data && data.tweet;
-  if (!t || !t.text) throw new Error("tweet-fx empty");
-  let text = t.text;
+  const artText = t ? articleToText(t.article) : "";
+  if (!t || (!t.text && !artText)) throw new Error("tweet-fx empty");
+  let text = t.text || "";
   if (t.quote && t.quote.text) {
     text += `\n\n[인용한 트윗 - @${(t.quote.author && t.quote.author.screen_name) || ""}]\n${t.quote.text}`;
+  }
+  // 트윗에 X 아티클(장문 글)이 붙어 있으면 그 본문까지 함께 싣는다.
+  if (artText && !text.includes(artText)) {
+    text = text ? `${text}\n\n[첨부된 X 아티클]\n${artText}` : artText;
   }
   const handle = (t.author && t.author.screen_name) || url.match(TWEET_RE)[1];
   const name = (t.author && t.author.name) || handle;
@@ -109,10 +169,14 @@ async function tryTweetVx(url) {
   const res = await fetch(`https://api.vxtwitter.com/i/status/${id}`, { headers: BROWSER_HEADERS });
   if (!res.ok) throw new Error(`tweet-vx ${res.status}`);
   const data = await res.json();
-  if (!data || !data.text) throw new Error("tweet-vx empty");
-  let text = data.text;
+  const artText = data ? articleToText(data.article) : "";
+  if (!data || (!data.text && !artText)) throw new Error("tweet-vx empty");
+  let text = data.text || "";
   if (data.qrt && data.qrt.text) {
     text += `\n\n[인용한 트윗 - @${data.qrt.user_screen_name || ""}]\n${data.qrt.text}`;
+  }
+  if (artText && !text.includes(artText)) {
+    text = text ? `${text}\n\n[첨부된 X 아티클]\n${artText}` : artText;
   }
   const handle = data.user_screen_name || url.match(TWEET_RE)[1];
   const name = data.user_name || handle;
@@ -233,6 +297,19 @@ async function fetchTweet(url, onProgress = () => {}) {
     if (!isTweet(shared) && /^https?:\/\//i.test(shared)) {
       onProgress(`공유 링크 목적지: ${shared}`);
       const who = tweet.handle || "트윗";
+      // 공유 링크가 X 아티클(장문 글)이면 미러 API로 본문을 먼저 시도한다.
+      if (isXArticle(shared)) {
+        onProgress("공유 링크가 X 아티클(장문 글) — 미러 API로 본문 수집 시도");
+        const xa = await tryXArticle(shared, onProgress);
+        if (xa) {
+          return {
+            title: xa.title || tweet.title,
+            text: `[${who} 가 공유한 X 아티클: ${shared}]\n\n${xa.text}`,
+            via: "tweet",
+            url: shared,
+          };
+        }
+      }
       const art = await fetchLinkedArticle(shared, onProgress);
       if (art && art.text) {
         return {
@@ -257,10 +334,15 @@ async function fetchTweet(url, onProgress = () => {}) {
       }
       // 코멘트도 거의 없는 순수 링크 공유 → 정직하게 붙여넣기 안내.
       throw new Error(
-        `이 트윗은 X(트위터) 안에서 로그인해야 보이는 콘텐츠를 공유한 것 같아요. ` +
-          `공유된 글의 본문을 자동으로 가져오지 못했습니다.\n` +
-          `→ 공유 링크: ${shared}\n` +
-          `이 링크를 열어 본문을 복사한 뒤 "본문 붙여넣기"(원문 링크 칸에 위 주소)로 넣으면 정확히 정리해드려요.`
+        isXArticle(shared)
+          ? `이 트윗이 공유한 건 X 아티클(프리미엄 장문 글)이에요. 로그인 장벽에 막혀 ` +
+            `우회 경로까지 모두 실패해 본문을 자동으로 가져오지 못했습니다.\n` +
+            `→ 아티클: ${shared}\n` +
+            `X 앱/웹에서 아티클을 열어 본문을 복사한 뒤 "본문 붙여넣기"(원문 링크 칸에 위 주소)로 넣으면 정확히 정리해드려요.`
+          : `이 트윗은 X(트위터) 안에서 로그인해야 보이는 콘텐츠를 공유한 것 같아요. ` +
+            `공유된 글의 본문을 자동으로 가져오지 못했습니다.\n` +
+            `→ 공유 링크: ${shared}\n` +
+            `이 링크를 열어 본문을 복사한 뒤 "본문 붙여넣기"(원문 링크 칸에 위 주소)로 넣으면 정확히 정리해드려요.`
       );
     }
   }
@@ -276,6 +358,14 @@ export async function fetchArticle(url, onProgress = () => {}) {
     throw new Error("올바른 http(s) 링크를 입력해주세요.");
   }
 
+  // X 아티클 링크를 직접 넣은 경우 — 미러 API 먼저, 실패하면 일반 전략으로 계속.
+  if (isXArticle(url)) {
+    onProgress("X 아티클(장문 글) 링크 감지 — 미러 API로 본문 수집 시도");
+    const xa = await tryXArticle(url, onProgress);
+    if (xa) return { title: xa.title, text: xa.text, via: "tweet", url };
+    onProgress("✗ 미러 API 모두 실패 — 일반 수집 전략으로 계속");
+  }
+
   // 트윗이면 트윗 전용 처리(필요 시 공유 링크 추적). fetchTweet이 안내 메시지를 던진다.
   if (isTweet(url)) {
     onProgress("X(트위터) 링크 감지 — 트윗 전용 수집 시작");
@@ -287,6 +377,10 @@ export async function fetchArticle(url, onProgress = () => {}) {
     onProgress(`${labelOf(strategy)} 시도…`);
     try {
       const r = await strategy(url);
+      // X 도메인은 로그인 장벽 페이지가 "본문"으로 긁혀올 수 있어 걸러낸다.
+      if (/(?:twitter|x)\.com\//i.test(url) && looksLikeXLoginWall(r.text)) {
+        throw new Error("X 로그인 장벽 페이지만 수집됨");
+      }
       onProgress(`✓ ${labelOf(strategy)} 성공 (${r.text.length.toLocaleString()}자)`);
       return { ...r, url }; // 원문 열기용 URL 동봉
     } catch (e) {
