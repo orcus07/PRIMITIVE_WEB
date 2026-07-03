@@ -1,0 +1,23 @@
+# 1회용 진단: X 아티클을 미러 API들이 어디까지 주는지 실측한다. 확인 후 삭제 예정.
+name: probe-x-article
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe mirrors
+        run: |
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36"
+          probe() {
+            echo ""
+            echo "===== $1"
+            curl -sS -m 30 -H "User-Agent: $UA" -w "\n--- HTTP %{http_code}\n" "$1" | head -c 6000
+            echo ""
+          }
+          probe "https://api.fxtwitter.com/status/2072231851821780992"
+          probe "https://api.vxtwitter.com/i/status/2072231851821780992"
+          probe "https://api.fxtwitter.com/status/2072257989453488462"
+          probe "https://api.vxtwitter.com/i/status/2072257989453488462"
+          probe "https://cdn.syndication.twimg.com/tweet-result?id=2072257989453488462&lang=en&token=5u6uuujxn"
+          probe "https://cdn.syndication.twimg.com/tweet-result?id=2072231851821780992&lang=en&token=5u3wfqwy7e"
+          probe "https://r.jina.ai/https://x.com/i/article/2072231851821780992"
