@@ -120,8 +120,8 @@ function articleToText(a) {
 async function tryXArticle(articleUrl, onProgress = () => {}) {
   const id = articleUrl.match(ARTICLE_RE)[1];
   const attempts = [
-    ["fxtwitter API", `https://api.fxtwitter.com/status/${id}`, (d) => d && d.tweet],
     ["vxtwitter API", `https://api.vxtwitter.com/i/status/${id}`, (d) => d],
+    ["fxtwitter API", `https://api.fxtwitter.com/status/${id}`, (d) => d && d.tweet],
   ];
   for (const [label, api, pick] of attempts) {
     onProgress(`X 아티클 ${label} 조회…`);
@@ -141,7 +141,7 @@ async function tryXArticle(articleUrl, onProgress = () => {}) {
   return null;
 }
 
-// 1순위: fxtwitter 공개 API (깔끔한 JSON, 인용 트윗까지)
+// fxtwitter 공개 API — 깔끔한 JSON이지만 Cloudflare가 데이터센터 IP를 막는 일이 잦아 후순위
 async function tryTweetFx(url) {
   const id = url.match(TWEET_RE)[2];
   const res = await fetch(`https://api.fxtwitter.com/status/${id}`, { headers: BROWSER_HEADERS });
@@ -163,7 +163,7 @@ async function tryTweetFx(url) {
   return { title: `${name} (@${handle}) 트윗`, text, via: "tweet", handle: `@${handle}`, article: t.article || null };
 }
 
-// 2순위: vxtwitter 공개 API — fxtwitter와 별개 인프라라 한쪽이 막혀도 교차 보완
+// 1순위: vxtwitter 공개 API — 서버(데이터센터 IP)에서 가장 안정적으로 응답
 async function tryTweetVx(url) {
   const id = url.match(TWEET_RE)[2];
   const res = await fetch(`https://api.vxtwitter.com/i/status/${id}`, { headers: BROWSER_HEADERS });
@@ -183,7 +183,7 @@ async function tryTweetVx(url) {
   return { title: `${name} (@${handle}) 트윗`, text, via: "tweet", handle: `@${handle}`, article: data.article || null };
 }
 
-// 3순위: X 공식 임베드(신디케이션) API — 위젯이 쓰는 경로라 인증 없이 트윗 JSON을 준다.
+// 2순위: X 공식 임베드(신디케이션) API — 위젯이 쓰는 경로라 인증 없이 트윗 JSON을 준다.
 // 토큰은 위젯과 같은 공개 규칙으로 계산한다.
 function syndicationToken(id) {
   return ((Number(id) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, "");
@@ -208,7 +208,7 @@ async function tryTweetSyndication(url) {
   return { title: `${name} (@${handle}) 트윗`, text, via: "tweet", handle: `@${handle}`, article: data.article || null };
 }
 
-// 4순위: 공식 oEmbed (첫 트윗 텍스트)
+// 4순위(후순위 fx 다음): 공식 oEmbed (첫 트윗 텍스트)
 async function tryTweetOembed(url) {
   const api = `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&omit_script=true&dnt=true`;
   const res = await fetch(api, { headers: BROWSER_HEADERS });
@@ -264,7 +264,7 @@ async function fetchLinkedArticle(u, onProgress = () => {}) {
 async function fetchTweet(url, onProgress = () => {}) {
   const errors = [];
   let tweet;
-  for (const s of [tryTweetFx, tryTweetVx, tryTweetSyndication, tryTweetOembed, tryProxy]) {
+  for (const s of [tryTweetVx, tryTweetSyndication, tryTweetFx, tryTweetOembed, tryProxy]) {
     onProgress(`트윗 ${labelOf(s)} 시도…`);
     try {
       const r = await s(url);

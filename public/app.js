@@ -7,6 +7,26 @@
   const LENS_KEY = "reader-perspective/v1";
   const $ = (id) => document.getElementById(id);
 
+  /* ---------- 접근 잠금(암호) ---------- */
+  // 서버에 ACCESS_KEY가 설정돼 있으면 API가 401을 준다.
+  // 그때 암호를 물어 저장하고 재시도 — 한 번 넣으면 이 브라우저에선 계속 기억.
+  const ACCESS_STORE = "reader-access-key/v1";
+  function getAccessKey() { try { return localStorage.getItem(ACCESS_STORE) || ""; } catch { return ""; } }
+  function setAccessKey(k) { try { localStorage.setItem(ACCESS_STORE, k); } catch {} }
+  async function apiFetch(url, options = {}, retried = false) {
+    const headers = Object.assign({}, options.headers);
+    const key = getAccessKey();
+    if (key) headers["x-access-key"] = key;
+    const res = await fetch(url, Object.assign({}, options, { headers }));
+    if (res.status === 401 && !retried) {
+      const entered = prompt("🔒 이 사이트는 잠겨 있어요. 접근 암호를 입력하세요:");
+      if (entered === null) return res; // 취소 → 401 그대로 반환
+      setAccessKey(entered.trim());
+      return apiFetch(url, options, true);
+    }
+    return res;
+  }
+
   /* ---------- 독자 관점(렌즈) ---------- */
   // 비우면 서버 기본값(반도체 마케터)으로 분석된다. 입력값은 localStorage에 저장.
   function getPerspective() {
@@ -46,7 +66,7 @@
     }
     status.textContent = "🧬 내 글들로 프로필 분석 중…";
     try {
-      const res = await fetch("/api/profile", {
+      const res = await apiFetch("/api/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items }),
@@ -169,7 +189,7 @@
 
   // 작업 제출 → jobId.
   async function submitJob(endpoint, body) {
-    const res = await fetch(endpoint, {
+    const res = await apiFetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -187,7 +207,7 @@
     for (;;) {
       let res, data;
       try {
-        res = await fetch(`/api/job/${jobId}`);
+        res = await apiFetch(`/api/job/${jobId}`);
         data = await res.json().catch(() => ({}));
       } catch {
         if (++netErrors > 40) throw new Error("연결이 계속 끊겨요. 잠시 후 다시 시도해주세요.");
@@ -218,9 +238,23 @@
     }
   }
 
+  // 같은 링크 재증류 방지 — 다시 돌리면 같은 비용이 다시 청구되므로 먼저 확인.
+  function normUrl(u) {
+    return (u || "").trim().replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase();
+  }
   async function digestUrl() {
     const url = $("url").value.trim();
     if (!url) return alert("링크를 입력하세요.");
+    const dup = records.find((r) => r.url && normUrl(r.url) === normUrl(url));
+    if (dup) {
+      const name = dup.koreanTitle || dup.originalTitle || "(제목 없음)";
+      const again = confirm(
+        `이미 보관함에 있는 글이에요:\n“${name}”\n\n` +
+        `다시 증류하면 같은 비용이 다시 청구됩니다.\n` +
+        `[확인] 그래도 다시 증류  ·  [취소] 보관된 결과 열기`
+      );
+      if (!again) { show(dup); $("url").value = ""; return; }
+    }
     busy(true);
     try {
       const result = await runJob("/api/digest", { url, perspective: getPerspective() });
@@ -289,7 +323,7 @@
   }
 
   async function postJson(endpoint, body) {
-    const res = await fetch(endpoint, {
+    const res = await apiFetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -481,6 +515,64 @@
     }
   }
 
+  /* ---------- 백업(내보내기/가져오기) ---------- */
+  // 보관함은 이 브라우저의 localStorage에만 있다. 기기 변경·데이터 삭제·
+  // 사파리의 미사용 사이트 정리(7일)로 사라질 수 있으므로 파일 백업을 제공한다.
+  const LAST_BACKUP_KEY = "reader-last-backup/v1";
+  function exportBackup() {
+    const data = {
+      app: "reader-archive", version: 1,
+      exportedAt: new Date().toISOString(),
+      perspective: loadPerspective(),
+      records,
+    };
+    const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `읽은글-백업-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+    try { localStorage.setItem(LAST_BACKUP_KEY, String(Date.now())); } catch {}
+    renderBackupNudge();
+  }
+  function importBackup(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(String(reader.result));
+        const incoming = Array.isArray(data) ? data : data.records;
+        if (!Array.isArray(incoming)) throw new Error("백업 파일 형식이 아니에요.");
+        const have = new Set(records.map((r) => r.id));
+        let added = 0;
+        incoming.forEach((r) => {
+          if (r && r.id && !have.has(r.id)) { records.push(r); have.add(r.id); added++; }
+        });
+        persist();
+        renderList();
+        // 백업의 관점은 현재 값이 비어 있을 때만 복원(수동 설정 보호)
+        if (data.perspective && !getPerspective()) {
+          $("lens-input").value = data.perspective;
+          savePerspective();
+        }
+        alert(`백업에서 ${added}개 글을 가져왔어요.` + (incoming.length - added ? ` (이미 있는 ${incoming.length - added}개는 건너뜀)` : ""));
+      } catch (e) {
+        alert("백업 파일을 읽지 못했어요: " + e.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+  // 글이 5개 이상 쌓였는데 백업이 7일 넘게 없으면 안내를 띄운다.
+  function renderBackupNudge() {
+    const el = $("backup-nudge");
+    if (!el) return;
+    let last = 0;
+    try { last = Number(localStorage.getItem(LAST_BACKUP_KEY) || 0); } catch {}
+    const stale = Date.now() - last > 7 * 24 * 3600 * 1000;
+    el.classList.toggle("hidden", !(records.length >= 5 && stale));
+  }
+
   /* ---------- 보관함 ---------- */
   function renderList() {
     const q = $("search").value.trim().toLowerCase();
@@ -507,6 +599,7 @@
     $("empty-list").textContent =
       records.length === 0 ? "아직 읽은 글이 없습니다." : "검색 결과가 없습니다.";
     $("list-count").textContent = records.length;
+    renderBackupNudge();
   }
 
   function searchText(r) {
@@ -540,6 +633,15 @@
     $("pdf-box").classList.toggle("hidden"));
   $("delete-btn").addEventListener("click", removeCurrent);
   $("search").addEventListener("input", renderList);
+
+  // 백업 내보내기/가져오기
+  $("backup-export").addEventListener("click", exportBackup);
+  $("backup-import").addEventListener("click", () => $("backup-file").click());
+  $("backup-file").addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) importBackup(f);
+    e.target.value = "";
+  });
 
   // 전문 완역 버튼 + 영어 원문 토글
   $("translate-btn").addEventListener("click", makeFullTranslation);
