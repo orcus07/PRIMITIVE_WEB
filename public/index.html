@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>영문 아티클 한글 리더</title>
-  <link rel="stylesheet" href="style.css?v=12" />
+  <link rel="stylesheet" href="style.css?v=13" />
 </head>
 <body>
   <header class="app-header">
@@ -24,6 +24,13 @@
         <ul id="list" class="list"></ul>
         <p id="empty-list" class="muted">아직 읽은 글이 없습니다.</p>
       </div>
+      <!-- 백업: 보관함은 이 브라우저에만 저장되므로 파일로 내보내 둘 수 있다 -->
+      <div class="backup-row">
+        <button id="backup-export" class="link-btn" type="button">💾 백업 내보내기</button>
+        <button id="backup-import" class="link-btn" type="button">가져오기</button>
+        <input id="backup-file" type="file" accept="application/json,.json" class="hidden" />
+      </div>
+      <p id="backup-nudge" class="backup-nudge hidden">⚠️ 읽은 글은 이 브라우저에만 저장돼요. 기기 변경·브라우저 정리로 사라질 수 있으니 가끔 <b>백업 내보내기</b>를 눌러 파일로 저장해 두세요.</p>
     </aside>
 
     <section class="main">
@@ -134,6 +141,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

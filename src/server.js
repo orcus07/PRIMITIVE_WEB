@@ -61,6 +61,18 @@ function warnIfLong(onProgress, chars) {
 const app = express();
 app.use(express.json({ limit: "40mb" })); // PDF base64 수용 (~22MB 파일 → base64 ~29MB + 여유)
 
+// ── 간단 접근 잠금 ─────────────────────────────────────────────
+// Render 환경변수 ACCESS_KEY를 설정하면 모든 API가 접근 암호를 요구한다.
+// (API가 열려 있으면 주소를 아는 누구나 소유자 비용으로 모델을 돌릴 수 있다.)
+// 미설정이면 기존처럼 공개로 동작. /api/health는 상태 확인용이라 항상 공개.
+const ACCESS_KEY = (process.env.ACCESS_KEY || "").trim();
+app.use("/api", (req, res, next) => {
+  if (!ACCESS_KEY || req.path === "/health") return next();
+  const got = ((req.get("x-access-key") || req.query.key || "") + "").trim();
+  if (got === ACCESS_KEY) return next();
+  res.status(401).json({ error: "접근 암호가 필요해요." });
+});
+
 // HTML은 절대 캐시하지 않는다(브라우저가 옛 index.html을 붙들고 ?v= 자산을
 // 영영 못 받는 문제 방지). 나머지 정적 자산은 ?v= 쿼리로 캐시를 무력화한다.
 app.use(
@@ -74,7 +86,7 @@ app.use(
 );
 
 app.get("/api/health", (_req, res) => {
-  res.json({ anthropic: Boolean(process.env.ANTHROPIC_API_KEY) });
+  res.json({ anthropic: Boolean(process.env.ANTHROPIC_API_KEY), locked: Boolean(ACCESS_KEY) });
 });
 
 // ──────────────────────────────────────────────────────────────
@@ -84,7 +96,7 @@ app.get("/api/health", (_req, res) => {
 // (무료 Render는 단일 인스턴스 + 장시간 유휴 시 잠들므로, 메모리 저장으로 충분.)
 // ──────────────────────────────────────────────────────────────
 const jobs = new Map(); // id -> { id, status, steps, result, error, createdAt }
-const JOB_TTL = 30 * 60 * 1000; // 30분 후 만료
+const JOB_TTL = 2 * 60 * 60 * 1000; // 2시간 후 만료 (결과를 늦게 받으러 와도 살아 있게)
 
 function sweepJobs(now) {
   for (const [id, j] of jobs) {
