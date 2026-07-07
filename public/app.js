@@ -646,6 +646,21 @@
     [...$("list").children].forEach((li) =>
       li.classList.toggle("active", li.dataset.id === currentId));
   }
+  // 현재 결과를 PDF로 저장 — 인쇄용 스타일(@media print)로 결과만 남기고
+  // 브라우저의 "PDF로 저장"을 연다. 서버 비용 0, 오프라인 파일로 보관 가능.
+  function saveAsPdf() {
+    const r = records.find((x) => x.id === currentId);
+    if (!r) return alert("먼저 글을 열어주세요.");
+    const prev = document.title;
+    // PDF 파일명이 글 제목으로 잡히도록 잠시 문서 제목을 바꾼다.
+    document.title = (r.koreanTitle || r.originalTitle || "읽은 글").slice(0, 80);
+    const restore = () => { document.title = prev; window.removeEventListener("afterprint", restore); };
+    window.addEventListener("afterprint", restore);
+    window.print();
+    // afterprint를 안 주는 브라우저 대비(모바일 일부) — 늦게라도 복원.
+    setTimeout(restore, 2000);
+  }
+
   function removeCurrent() {
     if (!currentId) return;
     if (!confirm("이 글을 보관함에서 삭제할까요?")) return;
@@ -665,6 +680,7 @@
   $("toggle-pdf").addEventListener("click", () =>
     $("pdf-box").classList.toggle("hidden"));
   $("delete-btn").addEventListener("click", removeCurrent);
+  $("pdf-save").addEventListener("click", saveAsPdf);
   $("search").addEventListener("input", renderList);
 
   // 백업 내보내기/가져오기
