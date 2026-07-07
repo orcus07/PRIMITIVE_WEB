@@ -37,9 +37,48 @@ function looksLikeXLoginWall(text) {
   return hits >= 2;
 }
 
-// HTML에서 잡음(script/style/nav 등)을 걷어내고 제목 + 본문 텍스트만 남긴다.
-function htmlToText(html) {
+// 본문 영역의 주요 이미지(그림·도표)를 캡션과 함께 추출한다.
+// 로고·아이콘류는 걸러내고, 상대 경로는 절대 URL로 푼다. 최대 12장.
+const IMG_JUNK = /logo|icon|avatar|badge|sprite|emoji|favicon|banner|share|button/i;
+function extractImages(root, baseUrl) {
+  const abs = (u) => { try { return new URL(u, baseUrl).href; } catch { return ""; } };
+  const container =
+    root.querySelector("article") || root.querySelector("main") || root.querySelector("body") || root;
+  const seen = new Set();
+  const out = [];
+  for (const img of container.querySelectorAll("img")) {
+    let src = img.getAttribute("src") || img.getAttribute("data-src") || "";
+    if (!src) {
+      // 반응형 srcset이면 가장 큰(마지막) 후보를 쓴다.
+      const ss = img.getAttribute("srcset") || img.getAttribute("data-srcset") || "";
+      if (ss) src = ss.split(",").pop().trim().split(/\s+/)[0] || "";
+    }
+    src = abs(src.trim());
+    if (!/^https?:/i.test(src) || IMG_JUNK.test(src) || seen.has(src)) continue;
+    const w = parseInt(img.getAttribute("width") || "0", 10);
+    const h = parseInt(img.getAttribute("height") || "0", 10);
+    if ((w && w < 100) || (h && h < 100)) continue; // 아이콘 크기 제외
+    seen.add(src);
+    // 캡션: 감싼 <figure>의 figcaption 우선, 없으면 alt.
+    let caption = (img.getAttribute("alt") || "").trim();
+    let p = img.parentNode;
+    for (let i = 0; i < 3 && p; i++, p = p.parentNode) {
+      if ((p.tagName || "").toLowerCase() === "figure") {
+        const fc = p.querySelector("figcaption");
+        if (fc && fc.text.trim()) caption = fc.text.replace(/\s+/g, " ").trim();
+        break;
+      }
+    }
+    out.push({ src, caption: caption.slice(0, 300) });
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+// HTML에서 잡음(script/style/nav 등)을 걷어내고 제목 + 본문 텍스트 + 주요 이미지를 남긴다.
+function htmlToText(html, baseUrl = "") {
   const root = parse(html, { blockTextElements: { script: false, style: false } });
+  const images = extractImages(root, baseUrl); // 제거 전에 추출 (figure가 aside 안에 있는 경우 등)
   root.querySelectorAll("script,style,noscript,nav,footer,header,aside,svg,form")
     .forEach((el) => el.remove());
 
@@ -52,16 +91,31 @@ function htmlToText(html) {
   const container =
     root.querySelector("article") || root.querySelector("main") || root.querySelector("body") || root;
   const text = container.text.replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim();
-  return { title, text };
+  return { title, text, images };
 }
 
 async function tryDirect(url) {
   const res = await fetch(url, { headers: BROWSER_HEADERS, redirect: "follow" });
   if (!res.ok) throw new Error(`direct ${res.status}`);
   const html = await res.text();
-  const { title, text } = htmlToText(html);
+  const { title, text, images } = htmlToText(html, res.url || url);
   if (text.length < 250) throw new Error("direct too short");
-  return { title, text, via: "direct" };
+  return { title, text, images, via: "direct" };
+}
+
+// 본문은 프록시로 얻었지만 이미지가 없는 경우, 이미지만 따로 직접 수집(최선 노력).
+async function fetchImagesOnly(url) {
+  try {
+    const res = await fetch(url, {
+      headers: BROWSER_HEADERS, redirect: "follow",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const root = parse(await res.text(), { blockTextElements: { script: false, style: false } });
+    return extractImages(root, res.url || url);
+  } catch {
+    return [];
+  }
 }
 
 async function tryProxy(url) {
@@ -343,6 +397,7 @@ async function fetchTweet(url, onProgress = () => {}) {
         return {
           title: art.title || tweet.title,
           text: `[${who} 가 공유한 링크: ${shared}]\n\n${art.text}`,
+          images: art.images || [],
           via: "tweet",
           url: shared, // 원문 열기 = 실제 목적지 글
         };
@@ -405,6 +460,9 @@ export async function fetchArticle(url, onProgress = () => {}) {
         throw new Error("X 로그인 장벽 페이지만 수집됨");
       }
       onProgress(`✓ ${labelOf(strategy)} 성공 (${r.text.length.toLocaleString()}자)`);
+      // 프록시 경유 등으로 이미지가 비었으면 이미지만 따로 직접 수집해 본다.
+      if (!r.images || !r.images.length) r.images = await fetchImagesOnly(url);
+      if (r.images.length) onProgress(`🖼 본문 이미지 ${r.images.length}장 수집`);
       return { ...r, url }; // 원문 열기용 URL 동봉
     } catch (e) {
       errors.push(e.message);

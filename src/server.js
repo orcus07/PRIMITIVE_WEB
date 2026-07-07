@@ -156,7 +156,11 @@ app.post("/api/digest", (req, res) => {
     const result = await distillArticle(fetched.text, {
       url: srcUrl, sourceTitle: fetched.title, onProgress, perspective,
     });
-    return { url: srcUrl, via: fetched.via, ...result, perspective, sourceText: capSource(fetched.text) };
+    return {
+      url: srcUrl, via: fetched.via, ...result, perspective,
+      images: fetched.images || [], // 본문 주요 이미지(URL+캡션) — 화면 갤러리용
+      sourceText: capSource(fetched.text),
+    };
   });
   res.json({ jobId: job.id });
 });
