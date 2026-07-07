@@ -355,6 +355,7 @@
     $("r-topic").textContent = r.topic || "";
     renderInsight(r);
     renderQuotes(r.keyQuotes);
+    renderImages(r.images);
     renderSections(r.sections);
     renderTerms(r.keyTerms);
     renderFullTranslation(r);
@@ -400,6 +401,38 @@
       fillList("r-angle", r.marketerInsight || []);
       noneEl.classList.add("hidden");
     }
+  }
+
+  // 본문 주요 이미지·도표 — 원문에서 추출한 URL을 그대로 표시(저장은 URL만).
+  // 핫링크가 차단되거나 깨진 이미지는 조용히 치운다.
+  function renderImages(images) {
+    const wrap = $("r-images");
+    wrap.innerHTML = "";
+    const list = (images || []).filter((im) => im && im.src);
+    $("r-images-wrap").classList.toggle("hidden", list.length === 0);
+    list.forEach((im) => {
+      const fig = document.createElement("figure");
+      fig.className = "r-img";
+      const a = document.createElement("a");
+      a.href = im.src; a.target = "_blank"; a.rel = "noopener";
+      const img = document.createElement("img");
+      img.src = im.src;
+      img.loading = "lazy";
+      img.referrerPolicy = "no-referrer";
+      img.alt = im.caption || "";
+      img.addEventListener("error", () => {
+        fig.remove();
+        if (!$("r-images").children.length) $("r-images-wrap").classList.add("hidden");
+      });
+      a.appendChild(img);
+      fig.appendChild(a);
+      if ((im.caption || "").trim()) {
+        const cap = document.createElement("figcaption");
+        cap.textContent = im.caption.trim();
+        fig.appendChild(cap);
+      }
+      wrap.appendChild(fig);
+    });
   }
 
   function renderSections(sections) {

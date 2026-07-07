@@ -176,6 +176,15 @@ blockquote {
 .rel-low { background: #f1f5f9; color: #475569; }
 .rel-none { background: #f1f5f9; color: #94a3b8; }
 
+/* 주요 이미지·도표 갤러리 */
+.img-grid { display: flex; flex-direction: column; gap: 16px; }
+.r-img { margin: 0; }
+.r-img img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--border); border-radius: 8px; background: #fff;
+}
+.r-img figcaption { margin-top: 5px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+
 .result ul { margin: 0; padding-left: 20px; }
 .result li { margin-bottom: 6px; }
 .section { margin-bottom: 16px; }
