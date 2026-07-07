@@ -240,3 +240,23 @@ dd { margin: 0 0 0 0; color: var(--muted); }
   .layout { grid-template-columns: 1fr; }
   .input-row { flex-direction: column; }
 }
+
+/* ── PDF로 저장 (인쇄) ─────────────────────────────────────────
+   "📄 PDF로 저장" 버튼이 window.print()를 부른다. 브라우저의
+   '저장 대상: PDF'(모바일 사파리는 공유 → 프린트)로 현재 결과만
+   깔끔한 문서로 떨어지게, 결과 외 UI는 전부 숨긴다. */
+@media print {
+  body { background: #fff; }
+  .app-header, .sidebar, .input-row, .sub-row, .progress-log,
+  .paste-box, .result-actions, #r-translate-actions, #key-warning,
+  .result h3 .link-btn { display: none !important; }
+  .layout { display: block; max-width: none; margin: 0; padding: 0; }
+  .main { border: none; box-shadow: none; padding: 0; }
+  .result { border-top: none; margin-top: 0; padding-top: 0; }
+  /* 화면용 내부 스크롤 해제 — 잘리지 않고 전체가 인쇄되게 */
+  #r-fulltrans, .source-text { max-height: none; overflow: visible; padding-right: 0; }
+  /* 문단·인용·이미지가 쪽 경계에서 반토막 나지 않게 */
+  .section, .quote, .r-img, blockquote { break-inside: avoid; }
+  .result h3 { break-after: avoid; }
+  a { color: inherit; text-decoration: none; }
+}
