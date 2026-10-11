@@ -77,12 +77,17 @@ function httpsFetch(url, options = {}) {
   });
 }
 
+// 대시보드에 붙여넣을 때 섞여 들어간 공백·줄바꿈·따옴표는 키가 아니므로 떼어낸다.
+export function apiKey() {
+  return (process.env.ANTHROPIC_API_KEY || "").trim().replace(/^["'`]+|["'`]+$/g, "").trim();
+}
+
 let _client;
 function client() {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!apiKey()) {
     throw new Error("ANTHROPIC_API_KEY 가 설정되지 않았습니다. .env 파일을 확인해주세요.");
   }
-  return (_client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, fetch: httpsFetch }));
+  return (_client ??= new Anthropic({ apiKey: apiKey(), fetch: httpsFetch }));
 }
 
 const SCHEMA = {

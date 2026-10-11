@@ -9,7 +9,7 @@ import { PDFDocument } from "pdf-lib";
 import { PDFParse } from "pdf-parse";
 
 import { fetchArticle } from "./lib/fetchArticle.js";
-import { distillArticle, distillPdf, estimateCostUsd, MODEL_LABEL, inferReaderProfile, translateFull } from "./lib/distill.js";
+import { distillArticle, distillPdf, estimateCostUsd, MODEL_LABEL, inferReaderProfile, translateFull, apiKey } from "./lib/distill.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -99,7 +99,7 @@ app.get("/vendor/:file", (req, res) => {
 });
 
 app.get("/api/health", (_req, res) => {
-  res.json({ anthropic: Boolean(process.env.ANTHROPIC_API_KEY), locked: Boolean(ACCESS_KEY) });
+  res.json({ anthropic: Boolean(apiKey()), locked: Boolean(ACCESS_KEY) });
 });
 
 // ──────────────────────────────────────────────────────────────
@@ -132,12 +132,23 @@ function startJob(run) {
       job.result = await run(onProgress);
       job.status = "done";
     } catch (err) {
-      job.error = err.message || "처리 중 오류가 발생했습니다.";
+      job.error = friendlyError(err);
       job.status = "error";
     }
   })();
 
   return job;
+}
+
+// Anthropic이 키를 거절(401)하면 원문 JSON 대신 고칠 곳을 알려준다.
+// 끝 4자리는 콘솔의 키와 같은 키가 들어갔는지 대조하는 용도.
+function friendlyError(err) {
+  const msg = (err && err.message) || "처리 중 오류가 발생했습니다.";
+  if ((err && err.status === 401) || /invalid x-api-key|authentication_error/i.test(msg)) {
+    const k = apiKey();
+    return `Anthropic이 서버의 API 키를 거절했어요(401). Render → 이 사이트의 서비스(primitive-web.onrender.com) → Environment의 ANTHROPIC_API_KEY를 console.anthropic.com에서 새로 만든 키로 바꿔주세요. (지금 서버 키 끝자리: …${k.slice(-4) || "없음"})`;
+  }
+  return msg;
 }
 
 // 작업 진행 상황/결과 폴링.
@@ -245,7 +256,7 @@ app.post("/api/profile", async (req, res) => {
     const profile = await inferReaderProfile(items);
     res.json({ profile });
   } catch (err) {
-    res.status(500).json({ error: err.message || "프로필 생성 중 오류가 발생했습니다." });
+    res.status(500).json({ error: friendlyError(err) });
   }
 });
 
