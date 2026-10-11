@@ -231,10 +231,16 @@ blockquote {
 dl { margin: 0; }
 dt { font-weight: 600; margin-top: 8px; }
 dd { margin: 0 0 0 0; color: var(--muted); }
-.result-actions { margin-top: 24px; display: flex; gap: 10px; }
+.result-actions { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 10px; }
+#pdf-hint { margin-top: 8px; }
 
 .muted { color: var(--muted); font-size: 14px; }
 .hidden { display: none !important; }
+
+/* PDF 파일 생성용 복제본 — 화면 밖에서 그려지며 내부 스크롤 없이 전체를 펼친다 */
+.pdf-render { margin: 0; padding: 4px 0 0; border: none; background: #fff; }
+.pdf-render #r-fulltrans, .pdf-render .source-text { max-height: none; overflow: visible; padding-right: 0; }
+.pdf-render a { color: inherit; text-decoration: none; }
 
 @media (max-width: 760px) {
   .layout { grid-template-columns: 1fr; }

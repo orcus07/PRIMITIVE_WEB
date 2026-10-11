@@ -366,6 +366,8 @@
     else link.classList.add("hidden");
 
     $("delete-btn").classList.remove("hidden");
+    $("pdf-ready").classList.add("hidden"); // 다른 글의 PDF 링크가 남지 않게
+    $("pdf-hint").classList.add("hidden");
     markActive();
   }
 
@@ -646,19 +648,185 @@
     [...$("list").children].forEach((li) =>
       li.classList.toggle("active", li.dataset.id === currentId));
   }
-  // 현재 결과를 PDF로 저장 — 인쇄용 스타일(@media print)로 결과만 남기고
-  // 브라우저의 "PDF로 저장"을 연다. 서버 비용 0, 오프라인 파일로 보관 가능.
-  function saveAsPdf() {
+  /* ---------- PDF 파일로 저장 ---------- */
+  // 인쇄창(window.print)은 아이폰 홈 화면 앱·카톡 등 인앱 브라우저에서 아예 안 뜨거나
+  // PDF 저장 경로가 숨어 있다. 그래서 결과 화면을 쪽 단위 이미지로 그려 진짜 PDF
+  // 파일을 만들어 내려받게 한다(브라우저에서 처리 — 서버 비용 0).
+  const scriptLoads = {};
+  function loadScript(src) {
+    if (!scriptLoads[src]) {
+      scriptLoads[src] = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => {
+          delete scriptLoads[src];
+          s.remove();
+          reject(new Error("PDF 도구를 불러오지 못했어요. 네트워크를 확인하고 다시 눌러주세요."));
+        };
+        document.head.appendChild(s);
+      });
+    }
+    return scriptLoads[src];
+  }
+
+  // CORS를 허용하지 않는 이미지는 캔버스에 그릴 수 없다 — 미리 확인해 걸러낸다.
+  function corsImageOk(src) {
+    return new Promise((resolve) => {
+      const im = new Image();
+      im.crossOrigin = "anonymous";
+      const t = setTimeout(() => resolve(false), 8000);
+      im.onload = () => { clearTimeout(t); resolve(true); };
+      im.onerror = () => { clearTimeout(t); resolve(false); };
+      im.src = src;
+    });
+  }
+  function imageSettled(img) {
+    if (img.complete) return Promise.resolve();
+    return new Promise((resolve) => {
+      img.addEventListener("load", resolve, { once: true });
+      img.addEventListener("error", resolve, { once: true });
+      setTimeout(resolve, 8000);
+    });
+  }
+
+  // 쪽을 나눠도 되는 세로 위치(px)들 — 블록의 아래 경계, 긴 문단은 줄 단위 경계.
+  function safeBreaks(root) {
+    const top0 = root.getBoundingClientRect().top;
+    const breaks = [];
+    (function walk(el) {
+      const kids = [...el.children].filter((c) => c.offsetHeight > 0);
+      const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+      if (el !== root && (hasText || !kids.length)) {
+        const b = el.getBoundingClientRect();
+        breaks.push(b.bottom - top0);
+        if (b.height > 120) {
+          // 긴 문단: 줄마다 끊을 수 있게 줄 상자의 아래 경계를 모은다.
+          const rg = document.createRange();
+          rg.selectNodeContents(el);
+          [...rg.getClientRects()].forEach((lr) => breaks.push(lr.bottom - top0));
+        }
+        return;
+      }
+      kids.forEach(walk);
+    })(root);
+    return [...new Set(breaks.map((y) => Math.ceil(y)))].sort((a, b) => a - b);
+  }
+  // 한 쪽 높이(pageH) 안에서 가장 아래쪽 안전 경계로 자른다. 없으면 강제로 자른다.
+  function paginate(breaks, total, pageH) {
+    const pages = [];
+    let start = 0;
+    while (start < total - 1) {
+      const limit = start + pageH;
+      if (limit >= total) { pages.push([start, total]); break; }
+      let end = 0;
+      for (const y of breaks) {
+        if (y > limit) break;
+        if (y > start + pageH * 0.4) end = y;
+      }
+      if (!end) end = limit;
+      pages.push([start, end]);
+      start = end;
+    }
+    return pages;
+  }
+
+  const IN_APP_UA = /KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|Line\/|; wv\)/i;
+  let pdfUrl = "";
+  async function saveAsPdf() {
     const r = records.find((x) => x.id === currentId);
     if (!r) return alert("먼저 글을 열어주세요.");
-    const prev = document.title;
-    // PDF 파일명이 글 제목으로 잡히도록 잠시 문서 제목을 바꾼다.
-    document.title = (r.koreanTitle || r.originalTitle || "읽은 글").slice(0, 80);
-    const restore = () => { document.title = prev; window.removeEventListener("afterprint", restore); };
-    window.addEventListener("afterprint", restore);
-    window.print();
-    // afterprint를 안 주는 브라우저 대비(모바일 일부) — 늦게라도 복원.
-    setTimeout(restore, 2000);
+    const btn = $("pdf-save");
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "⏳ PDF 준비 중…";
+    let root = null;
+    try {
+      await Promise.all([loadScript("vendor/html2canvas.min.js"), loadScript("vendor/jspdf.umd.min.js")]);
+
+      // 결과 화면을 복제해, 버튼·접힌 원문 등 PDF에 필요 없는 것을 뺀다.
+      const W = 760;
+      root = $("result").cloneNode(true);
+      root.removeAttribute("id");
+      root.classList.add("pdf-render");
+      root.querySelectorAll(".hidden, .result-actions, #r-translate-actions, #r-source-wrap, #pdf-hint, details.orig, .link-btn")
+        .forEach((n) => n.remove());
+      if (r.url) {
+        const src = document.createElement("p");
+        src.className = "muted small";
+        src.textContent = `원문: ${r.url}`;
+        root.insertBefore(src, root.children[1] || null);
+      }
+      root.style.cssText = `position:absolute;left:-10000px;top:0;width:${W}px;`;
+      document.body.appendChild(root);
+
+      // 이미지: CORS 미허용분은 캔버스에 못 그리므로 빼고 안내만 남긴다.
+      const figs = [...root.querySelectorAll(".r-img")];
+      let dropped = 0;
+      await Promise.all(figs.map(async (fig) => {
+        const img = fig.querySelector("img");
+        if (!img || !(await corsImageOk(img.src))) { fig.remove(); dropped++; return; }
+        img.loading = "eager";
+        img.crossOrigin = "anonymous";
+        img.removeAttribute("referrerpolicy");
+        img.src = img.src;
+        await imageSettled(img);
+      }));
+      if (figs.length) {
+        const wrap = root.querySelector("#r-images-wrap");
+        if (wrap && dropped === figs.length) wrap.remove();
+        else if (wrap && dropped) {
+          const note = document.createElement("p");
+          note.className = "muted small";
+          note.textContent = `※ 원본 사이트가 복사를 막은 이미지 ${dropped}장은 PDF에서 빠졌어요 (화면·원문에서 볼 수 있어요).`;
+          wrap.appendChild(note);
+        }
+      }
+
+      // A4, 여백 12mm. 화면 px → mm 비율로 한 쪽에 들어갈 높이(px)를 정한다.
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ unit: "mm", format: "a4", compress: true });
+      const M = 12, CW = 210 - M * 2, CH = 297 - M * 2;
+      const mmPerPx = CW / W;
+      const pageH = Math.floor(CH / mmPerPx);
+      const total = Math.ceil(root.getBoundingClientRect().height);
+      const pages = paginate(safeBreaks(root), total, pageH);
+
+      for (let i = 0; i < pages.length; i++) {
+        const [y0, y1] = pages[i];
+        btn.textContent = `⏳ PDF 만드는 중… ${i + 1}/${pages.length}쪽`;
+        const canvas = await window.html2canvas(root, {
+          x: 0, y: y0, width: W, height: y1 - y0,
+          scale: 1.6, backgroundColor: "#ffffff", useCORS: true, logging: false,
+          scrollX: 0, scrollY: 0, windowWidth: document.documentElement.clientWidth,
+        });
+        if (i) pdf.addPage();
+        pdf.addImage(canvas.toDataURL("image/jpeg", 0.8), "JPEG", M, M, CW, (y1 - y0) * mmPerPx);
+      }
+
+      const name = (r.koreanTitle || r.originalTitle || "읽은 글")
+        .replace(/[\\/:*?"<>|\n\r]+/g, " ").trim().slice(0, 80) + ".pdf";
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      pdfUrl = URL.createObjectURL(pdf.output("blob"));
+      const a = document.createElement("a");
+      a.href = pdfUrl;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // 자동 다운로드가 막히는 브라우저(인앱 등) 대비 — 다시 눌러 열 수 있는 링크.
+      const ready = $("pdf-ready");
+      ready.href = pdfUrl;
+      ready.download = name;
+      ready.classList.remove("hidden");
+      $("pdf-hint").classList.toggle("hidden", !IN_APP_UA.test(navigator.userAgent));
+    } catch (err) {
+      alert("PDF를 만들지 못했어요: " + (err && err.message ? err.message : err));
+    } finally {
+      if (root) root.remove();
+      btn.disabled = false;
+      btn.textContent = label;
+    }
   }
 
   function removeCurrent() {

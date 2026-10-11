@@ -85,6 +85,19 @@ app.use(
   })
 );
 
+// PDF 파일 생성용 브라우저 라이브러리 — 외부 CDN 대신 설치된 패키지를 그대로 서빙.
+// (버튼을 누를 때만 지연 로드되므로 평소 페이지 무게엔 영향 없음)
+const VENDOR = {
+  "html2canvas.min.js": "html2canvas/dist/html2canvas.min.js",
+  "jspdf.umd.min.js": "jspdf/dist/jspdf.umd.min.js",
+};
+app.get("/vendor/:file", (req, res) => {
+  const rel = VENDOR[req.params.file];
+  if (!rel) return res.sendStatus(404);
+  res.setHeader("Cache-Control", "public, max-age=604800");
+  res.sendFile(path.join(ROOT, "node_modules", rel));
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({ anthropic: Boolean(process.env.ANTHROPIC_API_KEY), locked: Boolean(ACCESS_KEY) });
 });
