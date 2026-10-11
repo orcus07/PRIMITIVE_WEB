@@ -102,6 +102,7 @@
     catch { return []; }
   }
   function persist() {
+    window.PensieveSync?.queue(records);
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(records)); return; } catch {}
     // 1차: 영어 원문 전문 제거(완역이 있으면 그 안에 영어가 들어 있어 중복).
     try {
