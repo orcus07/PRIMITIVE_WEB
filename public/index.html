@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>영문 아티클 한글 리더</title>
-  <link rel="stylesheet" href="style.css?v=15" />
+  <link rel="stylesheet" href="style.css?v=16" />
 </head>
 <body>
   <header class="app-header">
@@ -142,12 +142,14 @@
         <div class="result-actions">
           <a id="r-link" class="btn" target="_blank" rel="noopener">원문 열기 ↗</a>
           <button id="pdf-save" class="btn" type="button">📄 PDF로 저장</button>
+          <a id="pdf-ready" class="btn hidden" target="_blank" rel="noopener">✅ 만든 PDF 열기</a>
           <button id="delete-btn" class="btn btn-danger hidden">보관함에서 삭제</button>
         </div>
+        <p id="pdf-hint" class="muted small hidden">카카오톡 등 앱 안에서 연 화면이면 저장이 막힐 수 있어요. 메뉴(⋯)에서 <b>다른 브라우저로 열기</b>(Safari·Chrome) 후 다시 눌러주세요.</p>
       </article>
     </section>
   </main>
 
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>
