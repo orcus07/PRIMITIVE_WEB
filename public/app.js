@@ -168,9 +168,9 @@
   // 변환은 서버에서 연결과 무관하게 돌아간다. 브라우저는 jobId를 폴링해
   // 진행 상황을 표시하고 결과를 받는다. 백그라운드/새로고침에도 살아남는다.
   const PENDING_KEY = "reader-pending-job/v1";
-  function savePending(id) { try { localStorage.setItem(PENDING_KEY, id); } catch {} }
+  function savePending(id, launch = null) { localStorage.setItem(PENDING_KEY, JSON.stringify({id, launch})); }
   function clearPending() { try { localStorage.removeItem(PENDING_KEY); } catch {} }
-  function loadPending() { try { return localStorage.getItem(PENDING_KEY) || ""; } catch { return ""; } }
+  function loadPending() { try { const raw=localStorage.getItem(PENDING_KEY);if(!raw)return null;try{return JSON.parse(raw);}catch{return {id:raw};} } catch { return null; } }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // 서버가 준 경과시간(ms) 기준으로 진행 로그 한 줄 추가.
@@ -245,6 +245,8 @@
   }
   async function digestUrl() {
     const url = $("url").value.trim();
+    const launch = window.PensieveSync?.matching(url);
+    if (launch) {try {await distillFromLibrary(launch);} catch(err) {alert(err.message);} return;}
     if (!url) return alert("링크를 입력하세요.");
     const dup = records.find((r) => r.url && normUrl(r.url) === normUrl(url));
     if (dup) {
@@ -343,7 +345,7 @@
     persist();
     show(record);
     renderList();
-    maybeAutoProfile(); // 자동 갱신 켜져 있으면 새 글까지 반영해 프로필 갱신
+    if (!record._pensieveLaunch) maybeAutoProfile();
   }
 
   function show(r) {
@@ -536,7 +538,7 @@
     busy(true);
     $("translate-btn").disabled = true;
     try {
-      const jobId = await submitJob("/api/translate", { text: src, perspective: getPerspective() });
+      const jobId = await submitJob("/api/translate", { text: src, perspective: r._pensieveLaunch ? r.perspective : getPerspective() });
       const result = await pollJob(jobId, (d) => d && Array.isArray(d.segments) && d.segments.length);
       r.fullTranslation = result.segments;
       persist();
@@ -912,16 +914,41 @@
   renderList();
 
   // 페이지 진입 시, 백그라운드/새로고침으로 끊겼던 진행 중 작업이 있으면 이어받는다.
-  function resumePendingJob() {
-    const jobId = loadPending();
-    if (!jobId) return;
+  async function resumePendingJob() {
+    const pending = loadPending();
+    if (!pending) return;
+    const jobId = pending.id;
     busy(true); // 로그 초기화 + 버튼 비활성화
     setStatus("이전 작업 이어보는 중…");
     logStep("⏳ 진행 중이던 작업을 이어받는 중…");
-    pollJob(jobId)
-      .then((result) => { logStep("🎉 완료"); saveAndShow(result); })
+    await pollJob(jobId)
+      .then((result) => { logStep("🎉 완료"); saveAndShow(pending.launch ? {...result, _pensieveLaunch:pending.launch.id, perspective:pending.launch.perspective} : result); })
       .catch((err) => { logStep("❌ " + err.message); })
       .finally(() => { clearPending(); busy(false); });
   }
-  resumePendingJob();
+  async function distillFromLibrary(launch) {
+    if ($('run-btn').disabled) return;
+    if (loadPending()) throw Error('진행 중인 글 작업이 있습니다. 완료된 뒤 다시 눌러주세요.');
+    $('url').value=launch.url;
+    // The separate handoff panel shows this lens; keep standalone settings untouched.
+    busy(true);
+    try {
+      let endpoint='/api/digest', body={url:launch.url,perspective:launch.perspective};
+      if(launch.kind==='pdf') {
+        logStep('서재의 PDF를 가져오는 중…');
+        const file=await window.PensieveSync.request(launch.id,'/source');
+        if(file.size>22*1024*1024)throw Error('PDF 용량은 22MB 이하여야 합니다.');
+        endpoint='/api/digest-pdf';body={...body,filename:launch.title+'.pdf',base64:await fileToBase64(file)};
+      }
+      const jobId=await submitJob(endpoint,body);
+      savePending(jobId,{id:launch.id,perspective:launch.perspective});
+      const result=await pollJob(jobId);
+      saveAndShow({...result,_pensieveLaunch:launch.id,perspective:launch.perspective});
+      logStep('완료 · 원래 서재 콘텐츠로 전송합니다.');
+    } finally {clearPending();busy(false);}
+  }
+  resumePendingJob().then(()=>window.PensieveSync?.boot(distillFromLibrary, launch => {
+    const saved=records.find(record=>record._pensieveLaunch===launch.id);
+    if(saved){show(saved);return true;}return false;
+  }));
 })();
