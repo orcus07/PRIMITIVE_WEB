@@ -1,5 +1,7 @@
 # Personal library handoff
 
+The canonical article reader for the personal library is https://meeting-notes-eu0u.onrender.com. Its Render service deploys `claude/unclear-request-plepdz`, not `master`; confirm the GitHub deployment status and live assets when releasing. The `primitive-web.onrender.com` deployment and its API-key configuration are separate. Keep the existing `reader-archive/v1` browser storage untouched on the canonical origin.
+
 The reader accepts `#pensieve-launch=` from the private library. The fragment contains an item-scoped endpoint, launch ID and bearer; it is removed from browser history immediately. Never log or export that bearer.
 
 `public/pensieve-sync.js` loads source metadata and the library perspective before starting the existing distiller. Only records tagged `_pensieveLaunch` with a locally stored matching credential are queued for automatic return. Standalone reader runs keep their normal archive behavior. Previously pending legacy outbox records can finish delivery; new standalone records are not automatically exported.

@@ -146,7 +146,7 @@ function friendlyError(err) {
   const msg = (err && err.message) || "처리 중 오류가 발생했습니다.";
   if ((err && err.status === 401) || /invalid x-api-key|authentication_error/i.test(msg)) {
     const k = apiKey();
-    return `Anthropic이 서버의 API 키를 거절했어요(401). Render → 이 사이트의 서비스(primitive-web.onrender.com) → Environment의 ANTHROPIC_API_KEY를 console.anthropic.com에서 새로 만든 키로 바꿔주세요. (지금 서버 키 끝자리: …${k.slice(-4) || "없음"})`;
+    return `Anthropic이 서버의 API 키를 거절했어요(401). Render → 현재 접속한 주소의 서비스 → Environment의 ANTHROPIC_API_KEY를 console.anthropic.com에서 새로 만든 키로 바꿔주세요. (지금 서버 키 끝자리: …${k.slice(-4) || "없음"})`;
   }
   return msg;
 }
