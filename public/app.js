@@ -4,7 +4,6 @@
   "use strict";
 
   const STORAGE_KEY = "reader-archive/v1";
-  const LENS_KEY = "reader-perspective/v1";
   const $ = (id) => document.getElementById(id);
 
   /* ---------- 접근 잠금(암호) ---------- */
@@ -27,72 +26,11 @@
     return res;
   }
 
-  /* ---------- 독자 관점(렌즈) ---------- */
-  // 비우면 서버 기본값(반도체 마케터)으로 분석된다. 입력값은 localStorage에 저장.
-  function getPerspective() {
-    return ($("lens-input").value || "").trim();
-  }
-  function loadPerspective() {
-    try { return localStorage.getItem(LENS_KEY) || ""; } catch { return ""; }
-  }
-  function savePerspective() {
-    try { localStorage.setItem(LENS_KEY, getPerspective()); } catch {}
-  }
-  // 결과 헤딩에 쓰는 짧은 관점 라벨.
-  function angleTitleOf(p) {
-    // 자동 프로필처럼 긴 문장이면 앞부분만 짧게.
-    const t = (p || "").trim();
-    if (!t) return "반도체 마케터";
-    return t.length > 24 ? t.slice(0, 24) + "…" : t;
-  }
-
-  /* ---------- 내 프로필(자동 정의) ---------- */
-  // 읽은 글들로 "나"를 추론해 관점(렌즈)에 채운다. 자동 갱신 가능.
-  const AUTO_KEY = "reader-profile-auto/v1";   // 자동 갱신 켜짐 여부
-  const LAST_AUTO_KEY = "reader-profile-last/v1"; // 마지막 자동 생성값(수동 편집 보호용)
-  function archiveSummaries() {
-    return records.map((r) => ({
-      title: r.koreanTitle || r.originalTitle || "",
-      oneLiner: r.oneLiner || "",
-      topic: r.topic || "",
-    }));
-  }
-  async function buildProfile({ silent = false } = {}) {
-    const items = archiveSummaries();
-    const status = $("profile-status");
-    if (items.length < 2) {
-      if (!silent) status.textContent = "읽은 글이 2개 이상일 때 나를 정의할 수 있어요.";
-      return;
-    }
-    status.textContent = "🧬 내 글들로 프로필 분석 중…";
-    try {
-      const res = await apiFetch("/api/profile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.profile) throw new Error(data.error || `오류 (${res.status})`);
-      $("lens-input").value = data.profile;
-      savePerspective();
-      try { localStorage.setItem(LAST_AUTO_KEY, data.profile); } catch {}
-      status.textContent = `✅ 프로필이 갱신돼 관점에 반영됐어요 (읽은 글 ${items.length}개 기반).`;
-    } catch (err) {
-      status.textContent = "❌ " + err.message;
-    }
-  }
-  // 새 글이 추가될 때, 자동 갱신이 켜져 있고 사용자가 손수 바꾼 관점이 아니면 다시 만든다.
-  function maybeAutoProfile() {
-    let auto = false;
-    try { auto = localStorage.getItem(AUTO_KEY) === "1"; } catch {}
-    if (!auto || records.length < 2) return;
-    let last = "";
-    try { last = localStorage.getItem(LAST_AUTO_KEY) || ""; } catch {}
-    const cur = ($("lens-input").value || "").trim();
-    // 비어 있거나 마지막 자동값 그대로일 때만 갱신(수동 편집은 보호)
-    if (cur && cur !== last.trim()) return;
-    buildProfile({ silent: true });
-  }
+  /* ---------- 독자 관점: 인증된 서재 기본값 / 사용자 수정 보호 ---------- */
+  function getPerspective() { return window.ReaderPerspective.get(); }
+  function loadPerspective() { return $('lens-input').value || ''; }
+  function savePerspective() { window.ReaderPerspective.custom(); }
+  function angleTitleOf(p) { return p ? (p.length > 24 ? p.slice(0,24) + '…' : p) : '별도 설정 없음'; }
 
   let records = load();
   let currentId = null;
@@ -185,7 +123,7 @@
   }
 
   function resultIsOk(r) {
-    return !!(r && (r.koreanTitle || r.originalTitle || (r.sections && r.sections.length)));
+    return !!(r && Array.isArray(r.sections) && r.sections.length && window.ReaderQuality.assess(r, r.generation?.stopReason).status !== 'review');
   }
 
   // 작업 제출 → jobId.
@@ -219,7 +157,9 @@
       netErrors = 0;
       const steps = data.steps || [];
       for (; shown < steps.length; shown++) logStepMs(steps[shown].ms, steps[shown].msg);
+      if (data.status === 'needs_review') return {...data.result, quality: window.ReaderQuality.assess(data.result, data.result?.generation?.stopReason)};
       if (data.status === "done") {
+        if (!isOk && data.result?.sections && !valid(data.result)) return {...data.result, quality: window.ReaderQuality.assess(data.result, data.result?.generation?.stopReason)};
         if (!valid(data.result)) throw new Error("결과가 비어 있어요. 새로고침 후 다시 시도해주세요.");
         return data.result;
       }
@@ -261,7 +201,7 @@
     busy(true);
     try {
       const result = await runJob("/api/digest", { url, perspective: getPerspective() });
-      logStep("🎉 완료");
+      logStep("결과 수신 · 완성도 검사");
       saveAndShow(result);
       $("url").value = "";
     } catch (err) {
@@ -281,7 +221,7 @@
         url: $("paste-url").value.trim(),
         perspective: getPerspective(),
       });
-      logStep("🎉 완료");
+      logStep("결과 수신 · 완성도 검사");
       saveAndShow(result);
       $("paste-text").value = "";
       $("paste-title").value = "";
@@ -315,7 +255,7 @@
       logStep(`PDF 읽는 중: ${file.name} (${(file.size / 1048576).toFixed(1)}MB)`);
       const base64 = await fileToBase64(file);
       const result = await runJob("/api/digest-pdf", { base64, filename: file.name, perspective: getPerspective() });
-      logStep("🎉 완료");
+      logStep("결과 수신 · 완성도 검사");
       saveAndShow(result);
       $("pdf-file").value = "";
       $("pdf-box").classList.add("hidden");
@@ -337,15 +277,69 @@
   }
 
   /* ---------- 저장 & 표시 ---------- */
+  function renderQuality(r) {
+    const panel = $('quality-panel'); panel.replaceChildren();
+    const quality = window.ReaderQuality.assess(r, r.generation?.stopReason);
+    const reviewed = r.reviewedSections === JSON.stringify(r.sections);
+    panel.classList.remove('hidden');
+    const text = document.createElement('p');
+    text.textContent = reviewed ? '사용자 검토 기록 있음 · 자동 검사가 의미의 완전성을 보장하지는 않습니다.' : quality.status === 'review' ? '검토 필요 · 정상 완료가 아닙니다. 원문과 의심 구간을 대조해 수정하세요. 전체 재증류나 유료 호출은 하지 않습니다.' : quality.status === 'warning' ? '확인 권장 · 아래 신호만으로 내용이 불완전하다고 단정하지 않습니다.' : '자동 검사 통과 · 원문 전체의 의미·사례를 빠짐없이 담았다는 보장은 아닙니다.';
+    panel.append(text);
+    const edits = [];
+    for (const issue of quality.issues) {
+      const p = document.createElement('p'); p.textContent = `${issue.section == null ? '응답' : (issue.section + 1) + '번'}: ${issue.signals.join(' · ')}`; panel.append(p);
+      if (issue.section == null) continue;
+      const details = document.createElement('details'), title = document.createElement('summary');
+      title.textContent = `${issue.section + 1}번만 검토·수정`; details.append(title);
+      const content = document.createElement('textarea'), original = document.createElement('textarea');
+      content.setAttribute('aria-label', `${issue.section + 1}번 한글 본문`); content.value = r.sections[issue.section].content;
+      original.setAttribute('aria-label', `${issue.section + 1}번 대응 영어 원문`); original.value = r.sections[issue.section].original || '';
+      content.style.cssText = original.style.cssText = 'width:100%;min-height:100px;box-sizing:border-box';
+      details.append(content, original); panel.append(details); edits.push({index:issue.section,content,original});
+    }
+    if (quality.issues.length && !reviewed) {
+      const save = document.createElement('button'); save.textContent = '해당 구간 검토 후 저장'; save.type = 'button';
+      save.onclick = () => {
+        const candidate = {...r, sections:r.sections.map(s=>({...s}))};
+        const normalize = value => value.replace(/\s+/g, ' ').trim();
+        for (const edit of edits) {
+          const section = candidate.sections[edit.index];
+          section.content = edit.content.value.trim(); section.original = edit.original.value.trim();
+          if (!section.content) return alert('빈 본문은 완료로 저장할 수 없습니다.');
+          if (section.original && r.sourceText && !normalize(r.sourceText).includes(normalize(section.original))) return alert('추가한 대응 원문이 보관된 영어 원문에 없습니다. 원문에서 그대로 가져와 주세요.');
+        }
+        if (!confirm('원문과 대조해 해당 구간을 검토했습니까? 남은 경고는 사용자 검토 기록과 함께 보존합니다.')) return;
+        candidate.reviewedSections = JSON.stringify(candidate.sections);
+        saveAndShow(candidate); localStorage.removeItem('reader-review-draft/v1');
+      };
+      panel.append(save);
+    }
+    if (quality.status === 'review') {
+      const download = document.createElement('button'); download.textContent = '검토 초안 내려받기';
+      download.onclick = () => {
+        const url = URL.createObjectURL(new Blob([JSON.stringify(r,null,2)],{type:'application/json'}));
+        const a = document.createElement('a'); a.href=url; a.download='reader-review-draft.json'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+      }; panel.append(download);
+    }
+  }
+
   function saveAndShow(result) {
+    const quality = window.ReaderQuality.assess(result, result.generation?.stopReason);
+    if (quality.status === 'review' && result.reviewedSections !== JSON.stringify(result.sections)) {
+      const draft = {...result, id: result.id || 'draft_' + Date.now(), quality};
+      try { localStorage.setItem('reader-review-draft/v1', JSON.stringify(draft)); } catch { alert('초안 저장에 실패했습니다. 페이지를 닫기 전에 백업을 내려받아 주세요.'); }
+      show(draft); logStep('검토 필요 · 초안만 보관, 기존 자료와 PC 서재는 유지합니다.'); return;
+    }
     const record = Object.assign(
       { id: "a_" + Date.now().toString(36), createdAt: Date.now() }, result
     );
-    records.push(record);
+    record.quality = quality;
+    const existing = records.findIndex(r => r.id === record.id);
+    if (existing >= 0) records[existing] = record; else records.push(record);
     persist();
     show(record);
     renderList();
-    if (!record._pensieveLaunch) maybeAutoProfile();
+
   }
 
   function show(r) {
@@ -363,6 +357,7 @@
     renderTerms(r.keyTerms);
     renderFullTranslation(r);
     renderSourceText(r);
+    renderQuality(r);
 
     const link = $("r-link");
     if (r.url) { link.href = r.url; link.classList.remove("hidden"); }
@@ -380,7 +375,7 @@
       const li = document.createElement("li"); li.textContent = t; ul.appendChild(li);
     });
   }
-  // 핵심 시사점 + 반도체 마케터 관점(연관도 정직 표시). 구버전 기록(marketerInsight) 호환.
+  // 핵심 시사점 + 별도로 표시하는 독자 관점의 해석. 구버전 기록(marketerInsight) 호환.
   function renderInsight(r) {
     // 핵심 시사점
     fillList("r-takeaways", r.keyTakeaways || []);
@@ -590,7 +585,7 @@
         persist();
         renderList();
         // 백업의 관점은 현재 값이 비어 있을 때만 복원(수동 설정 보호)
-        if (data.perspective && !getPerspective()) {
+        if (data.perspective && !loadPerspective()) {
           $("lens-input").value = data.perspective;
           savePerspective();
         }
@@ -891,26 +886,30 @@
     try { localStorage.setItem(LIST_KEY, nowCollapsed ? "1" : "0"); } catch {}
   });
 
-  // 관점 설정: 토글 열기/닫기, 저장, 프리셋 칩
-  $("toggle-lens").addEventListener("click", () =>
-    $("lens-box").classList.toggle("hidden"));
-  $("lens-input").value = loadPerspective();
-  $("lens-input").addEventListener("change", savePerspective);
-  document.querySelectorAll(".lens-presets .chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      $("lens-input").value = chip.dataset.lens || "";
-      savePerspective();
+  $('toggle-lens').addEventListener('click', () => $('lens-box').classList.toggle('hidden'));
+  const perspectiveReady = window.ReaderPerspective.init();
+
+  window.addEventListener('pensieve-canonical', event => {
+    const {launch, record} = event.detail;
+    let changed = false;
+    records = records.map(current => {
+      if(current._pensieveLaunch !== launch || !record.contentRevision || record.contentRevision === current.contentRevision) return current;
+      changed = true;
+      const next = {...current, sections:record.sections, sourceText:record.sourceText, contentRevision:record.contentRevision, quality:record.quality};
+      delete next.reviewedSections; return next;
     });
+    if(changed) {persist(); renderList(); const selected=records.find(r=>r.id===currentId);if(selected)show(selected);}
   });
-
-  // 내 프로필(자동 정의): 수동 생성 버튼 + 자동 갱신 토글
-  $("profile-build").addEventListener("click", () => buildProfile());
-  try { $("profile-auto").checked = localStorage.getItem(AUTO_KEY) === "1"; } catch {}
-  $("profile-auto").addEventListener("change", (e) => {
-    try { localStorage.setItem(AUTO_KEY, e.target.checked ? "1" : "0"); } catch {}
-    if (e.target.checked) maybeAutoProfile(); // 켜는 즉시 한 번 반영
-  });
-
+  window.PensieveSync?.canonical(records);
+  window.addEventListener('online',()=>window.PensieveSync?.canonical(records));
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)window.PensieveSync?.canonical(records);});
+  try {
+    const draft = JSON.parse(localStorage.getItem('reader-review-draft/v1'));
+    if(draft) {
+      const button=document.createElement('button');button.textContent='검토 중인 초안 열기';button.onclick=()=>show(draft);
+      $('pensieve-sync-status').after(button);
+    }
+  } catch {}
   renderList();
 
   // 페이지 진입 시, 백그라운드/새로고침으로 끊겼던 진행 중 작업이 있으면 이어받는다.
@@ -922,7 +921,7 @@
     setStatus("이전 작업 이어보는 중…");
     logStep("⏳ 진행 중이던 작업을 이어받는 중…");
     await pollJob(jobId)
-      .then((result) => { logStep("🎉 완료"); saveAndShow(pending.launch ? {...result, _pensieveLaunch:pending.launch.id, perspective:pending.launch.perspective} : result); })
+      .then((result) => { logStep("결과 수신 · 완성도 검사"); saveAndShow(pending.launch ? {...result, _pensieveLaunch:pending.launch.id, perspective:pending.launch.perspective} : result); })
       .catch((err) => { logStep("❌ " + err.message); })
       .finally(() => { clearPending(); busy(false); });
   }
@@ -930,10 +929,10 @@
     if ($('run-btn').disabled) return;
     if (loadPending()) throw Error('진행 중인 글 작업이 있습니다. 완료된 뒤 다시 눌러주세요.');
     $('url').value=launch.url;
-    // The separate handoff panel shows this lens; keep standalone settings untouched.
+    const appliedPerspective = getPerspective();
     busy(true);
     try {
-      let endpoint='/api/digest', body={url:launch.url,perspective:launch.perspective};
+      let endpoint='/api/digest', body={url:launch.url,perspective:appliedPerspective};
       if(launch.kind==='pdf') {
         logStep('서재의 PDF를 가져오는 중…');
         const file=await window.PensieveSync.request(launch.id,'/source');
@@ -941,14 +940,16 @@
         endpoint='/api/digest-pdf';body={...body,filename:launch.title+'.pdf',base64:await fileToBase64(file)};
       }
       const jobId=await submitJob(endpoint,body);
-      savePending(jobId,{id:launch.id,perspective:launch.perspective});
+      savePending(jobId,{id:launch.id,perspective:appliedPerspective});
       const result=await pollJob(jobId);
-      saveAndShow({...result,_pensieveLaunch:launch.id,perspective:launch.perspective});
-      logStep('완료 · 원래 서재 콘텐츠로 전송합니다.');
+      saveAndShow({...result,_pensieveLaunch:launch.id,perspective:appliedPerspective});
+      logStep('검사된 결과만 원래 서재 콘텐츠로 전송합니다.');
     } finally {clearPending();busy(false);}
   }
-  resumePendingJob().then(()=>window.PensieveSync?.boot(distillFromLibrary, launch => {
+  Promise.all([resumePendingJob(), perspectiveReady]).then(()=>window.PensieveSync?.boot(distillFromLibrary, async launch => {
     const saved=records.find(record=>record._pensieveLaunch===launch.id);
-    if(saved){show(saved);return true;}return false;
+    if(saved){show(saved);return true;}
+    try{const response=await window.PensieveSync.request(launch.id,'/document');if(response.record?.contentRevision){saveAndShow(response.record);return true;}}catch{}
+    return false;
   }));
 })();

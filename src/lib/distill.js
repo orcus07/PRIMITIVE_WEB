@@ -1,9 +1,11 @@
 // 영문 본문을 받아 한글로 번역·구조화·증류한다. (Claude claude-sonnet-5)
-// 독자 관점(렌즈)은 사용자가 주입할 수 있고, 비우면 기본값(반도체 마케터·AI 동향)을 쓴다.
+// 독자 관점은 인증된 서재 또는 사용자가 제공한다. 빈 관점에서는 개인 취향을 추측하지 않는다.
 // 무관한 글까지 억지로 그 관점에 끼워 맞추지 않도록 — 연관도를 정직하게 표시한다.
 import Anthropic from "@anthropic-ai/sdk";
 import https from "node:https";
 import { Readable } from "node:stream";
+import { createHash } from 'node:crypto';
+import '../../public/quality.js';
 
 // 번역·구조화는 Opus까지 안 가도 품질이 충분하다. Sonnet 5는 4.6 후속이면서 정가가
 // 동일($3/$15 per 1M)이고, 2026-08-31까지 도입가($2/$10)로 오히려 더 싸다.
@@ -177,7 +179,7 @@ const SCHEMA = {
 };
 
 // 사용자가 비워두면 쓰는 기본 독자 관점.
-const DEFAULT_PERSPECTIVE = "SK하이닉스의 반도체 마케터이며, AI 산업 동향에 관심이 많다";
+const DEFAULT_PERSPECTIVE = "별도의 독자 관점이 제공되지 않았다. 개인 취향을 추측하지 않는다";
 
 // 독자 관점(렌즈)을 주입해 시스템 프롬프트를 만든다.
 function buildSystem(perspective) {
@@ -188,6 +190,7 @@ function buildSystem(perspective) {
 번역·정리 원칙:
 - 번역은 원문의 의도와 뉘앙스에 충실하게, 맥락 손실을 최소화한다. 임의로 줄이거나 왜곡하지 않는다.
 - sections는 "요약"이 아니라 원문 흐름을 따라간 충실한 한글 정리다. 중요한 논지·근거·숫자·사례를 빠뜨리지 않는다.
+- 독자 취향은 marketerAngle에만 적용한다. 취향과 무관해도 원문의 주요 내용을 생략하지 않는다. 각 구간은 끝까지 완결하고 대응 원문을 포함한다.
 - 각 section의 original 필드에는 그 한글 본문(content)에 대응하는 원문(영문)을 "번역하지 말고 원문 그대로" 옮긴다. 독자가 원문과 대조할 수 있게 하기 위함이다. 원문을 구할 수 없으면 빈 문자열로 둔다.
 - oneLiner와 topic은 글의 본질을 증류해 한눈에 파악하게 한다.
 - 원문에 없는 사실·숫자·고유명사를 절대 지어내지 않는다. 확실하지 않으면 적지 않는다.
@@ -222,7 +225,7 @@ function buildSystem(perspective) {
  * @param {{url?: string, sourceTitle?: string}} [meta]
  */
 // Render↔Anthropic 간헐적 연결 끊김("Premature close") 대비:
-// 스트리밍으로 받아 연결을 유지하고, 실패하면 최대 3회 재시도한다.
+// 응답을 받아 검사하되 비용이 큰 전체 재호출은 자동으로 하지 않는다.
 async function runStructured(messages, onProgress = () => {}, perspective = "") {
   const params = {
     model: MODEL,
@@ -237,35 +240,21 @@ async function runStructured(messages, onProgress = () => {}, perspective = "") 
     messages,
   };
 
-  let lastErr;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      onProgress(attempt === 1 ? "Claude 증류 중… (번역·구조화)" : `Claude 재시도 ${attempt}/3…`);
-      const stream = client().messages.stream(params);
-      const message = await stream.finalMessage();
-      // 출력이 한도에서 잘렸다면 JSON이 불완전하다. 재시도해도 같은 결과이므로
-      // 즉시 명확한 안내로 중단한다(무의미한 재시도 방지).
-      if (message.stop_reason === "max_tokens") {
-        const err = new Error(
-          "글이 너무 길어 한 번에 정리하지 못했어요(출력 한도 초과). 본문을 줄이거나 둘로 나눠서 다시 시도해주세요."
-        );
-        err.noRetry = true;
-        throw err;
-      }
-      const block = message.content.find((b) => b.type === "text");
-      if (!block) throw new Error("Claude 응답에서 결과를 찾지 못했습니다.");
-      onProgress("✓ 증류 완료");
-      return JSON.parse(block.text);
-    } catch (err) {
-      lastErr = err;
-      onProgress(`✗ 증류 실패: ${err.message}`);
-      // 재시도는 "일시적" 오류(연결 끊김·과부하·5xx)에만 한다. 잘림이나 결정적
-      // 오류를 재시도하면 비싼 출력만 또 생성돼 비용이 낭비된다.
-      if (err.noRetry || !isTransient(err)) throw err;
-      if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt)); // 3s, 6s
-    }
+  // A transport failure may happen after a billed response. Do not repeat a full
+  // document automatically; retain reviewable sections and repair only those.
+  try {
+    onProgress('Claude 증류 중… (번역·구조화)');
+    const message = await client().messages.stream(params, {maxRetries: 0}).finalMessage();
+    const result = globalThis.ReaderQuality.parseResponse(message);
+    const raw = message.content.filter(b => b.type === 'text').map(b => b.text).join('');
+    result.generation.responseSha256 = createHash('sha256').update(raw).digest('hex');
+    result.generation.receivedAt = new Date().toISOString();
+    onProgress(result.quality.status === 'review' ? '검토 필요 · 의심 구간을 초안으로 보존합니다. 자동 재증류 없음.' : '자동 검사 종료 · 내용 충실성은 원문과 대조할 수 있습니다.');
+    return result;
+  } catch (err) {
+    onProgress('증류 응답 처리 실패 · 전체 자동 재호출은 하지 않습니다.');
+    throw err;
   }
-  throw lastErr;
 }
 
 // 재시도할 가치가 있는 일시적 오류인지. (연결 끊김 "Premature close" 포함)

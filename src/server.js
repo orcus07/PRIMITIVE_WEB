@@ -130,7 +130,7 @@ function startJob(run) {
   (async () => {
     try {
       job.result = await run(onProgress);
-      job.status = "done";
+      job.status = job.result?.quality?.status === 'review' ? 'needs_review' : 'done';
     } catch (err) {
       job.error = friendlyError(err);
       job.status = "error";

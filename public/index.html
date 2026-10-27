@@ -9,7 +9,7 @@
 <body>
   <header class="app-header">
     <h1>📰 영문 아티클 한글 리더</h1>
-    <p class="subtitle">영어 링크를 넣으면 원문에 충실하게 한글로 옮기고, 핵심만 증류해 드려요 · <b>반도체 마케터 · AI 동향</b> 관점</p>
+    <p class="subtitle">영어 링크를 넣으면 원문에 충실하게 한글로 옮기고, 핵심만 증류해 드려요 · <b>서재 취향</b>을 바탕으로, 원문과 해석을 구분합니다</p>
     <p id="key-warning" class="warning hidden"></p>
   </header>
 
@@ -47,22 +47,13 @@
       </div>
 
       <!-- 독자 관점(렌즈) 설정(접힘) -->
-      <div id="lens-box" class="paste-box hidden">
-        <p class="hint">어떤 <b>관점·맥락</b>으로 분석할지 적어주세요. 비워두면 기본값(반도체 마케터·AI 동향)으로 분석해요. 한 번 정하면 저장돼 다음에도 유지됩니다.</p>
-        <textarea id="lens-input" rows="2" placeholder="예: 스타트업 창업자 / 반도체 영업담당 / AI 투자자 / 그냥 일반 독자…  (또는 아래 '내 글들로 나를 정의')"></textarea>
-        <div class="lens-presets">
-          <button type="button" class="chip" data-lens="">반도체 마케터(기본)</button>
-          <button type="button" class="chip" data-lens="AI 스타트업 창업자">스타트업 창업자</button>
-          <button type="button" class="chip" data-lens="AI·반도체 분야에 투자하는 투자자">투자자</button>
-          <button type="button" class="chip" data-lens="특정 배경 없이 교양으로 읽는 일반 독자">일반 독자</button>
-        </div>
-        <!-- 내 프로필(자동 정의) -->
-        <div class="lens-auto">
-          <button id="profile-build" type="button" class="btn">🧬 내 글들로 나를 정의</button>
-          <label class="auto-toggle"><input type="checkbox" id="profile-auto" /> 글 추가하면 자동 갱신</label>
-        </div>
-        <p class="hint">내가 읽은 글들을 바탕으로 “나”를 한 문단으로 정의해 위 관점에 채워줘요. (제목·요약만 분석해 저렴)</p>
-        <p id="profile-status" class="status"></p>
+      <div id="lens-box" class="paste-box">
+        <p class="hint">기본은 인증된 PC 서재의 누적 취향입니다. 번역·구조화는 원문에 충실하게, 취향에 따른 해석은 별도로 표시합니다. 직접 수정한 관점은 자동으로 바꾸지 않습니다.</p>
+        <textarea id="lens-input" rows="6" aria-label="실제 적용할 관점" placeholder="서재를 연결하거나 사용할 관점을 직접 입력하세요"></textarea>
+        <button id="lens-reset" type="button" class="btn">서재 취향으로 되돌리기</button>
+        <button id="lens-refresh" type="button" class="link-btn">PC 연결 다시 확인</button>
+        <a href="https://library.pensiev.me" target="_blank" rel="noopener">서재 열기 ↗</a>
+        <p id="profile-status" class="status" role="status"></p>
       </div>
 
       <!-- 진행 상황 로그(단계별) -->
@@ -86,6 +77,7 @@
       <!-- 결과 -->
       <article id="result" class="result hidden">
         <h2 id="r-title"></h2>
+        <section id="quality-panel" class="warning hidden" aria-live="polite"></section>
         <p id="r-original" class="muted small"></p>
         <p id="r-date" class="muted small"></p>
 
@@ -102,7 +94,7 @@
           <div id="r-quotes"></div>
         </section>
 
-        <h3>📌 <span id="r-angle-title">반도체 마케터</span> 관점 <span id="r-relevance" class="relevance"></span></h3>
+        <h3>📌 <span id="r-angle-title">독자</span> 관점의 해석 (원문과 구분) <span id="r-relevance" class="relevance"></span></h3>
         <ul id="r-angle"></ul>
         <p id="r-angle-none" class="muted small hidden">이 글은 설정한 관점과 직접 연관은 약해요.</p>
 
@@ -151,7 +143,9 @@
     </section>
   </main>
 
-  <script src="pensieve-sync.js?v=library-launch-1"></script>
-  <script src="app.js?v=library-launch-1"></script>
+  <script src="quality.js?v=20261026"></script>
+  <script src="pensieve-sync.js?v=20261026"></script>
+  <script src="perspective.js?v=20261026"></script>
+  <script src="app.js?v=20261026"></script>
 </body>
 </html>
