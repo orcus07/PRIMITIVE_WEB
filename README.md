@@ -86,3 +86,8 @@ public/                 화면(UI) + 보관함
 - 개인 취향·대화·인증값·복구 대상 원문은 공개 저장소에 넣지 않습니다.
 
 검증: `node --test test/quality.test.js`. 브라우저 회귀 검사는 `PLAYWRIGHT_MODULE`에 기존 Playwright 설치 경로를 지정한 뒤 `node test/reader-browser.cjs`로 실행합니다. 모든 요청을 가로채므로 모델 호출이나 운영 데이터 변경은 없습니다.
+
+
+## 원문 인코딩 처리 (2026-10-31, 로컬 수정)
+
+HTML 직접 수집은 원본 바이트의 BOM, HTTP charset, HTML meta charset 순서로 인코딩을 결정한다. 선언이 없으면 UTF-8로 읽는다. Shift_JIS 일본어 페이지를 Response.text()로 읽어 문자가 손상되던 문제를 수정했다. 해독 실패 또는 다량의 U+FFFD 대체문자는 성공 본문으로 증류하지 않고 기존 프록시 경로를 시도한다. 프록시에서도 손상이 확인되면 오류로 중단한다. 이미 저장된 손상 증류는 별도 원문 재수집·재증류가 필요하다. `npm test`의 실제 수집 경로 회귀 테스트 및 Aozora 실원문 대조를 통과했다. 이 설명은 원격 배포 완료를 의미하지 않는다.

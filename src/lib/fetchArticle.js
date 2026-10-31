@@ -94,11 +94,41 @@ function htmlToText(html, baseUrl = "") {
   return { title, text, images };
 }
 
+// Response.text() always uses UTF-8, even when a legacy page declares Shift_JIS.
+// Decode the original bytes before parsing; U+FFFD cannot be repaired afterwards.
+async function responseHtml(res) {
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const charset = (value) => value?.match(/charset\s*=\s*["']?([^\s"';/>]+)/i)?.[1];
+  let encoding;
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) encoding = 'utf-8';
+  else if (bytes[0] === 0xff && bytes[1] === 0xfe) encoding = 'utf-16le';
+  else if (bytes[0] === 0xfe && bytes[1] === 0xff) encoding = 'utf-16be';
+  else {
+    const head = new TextDecoder('windows-1252').decode(bytes.slice(0, 4096));
+    encoding = charset(res.headers.get('content-type'));
+    if (!encoding) {
+      for (const meta of head.match(/<meta\b[^>]*>/gi) || []) {
+        encoding = charset(meta);
+        if (encoding) break;
+      }
+    }
+  }
+  return new TextDecoder(encoding || 'utf-8', { fatal: true }).decode(bytes);
+}
+
+function requireReadable(text) {
+  const replacements = (text.match(/\ufffd/g) || []).length;
+  if (replacements >= 10 && replacements / text.length > 0.01) {
+    throw new Error('원문 문자 인코딩을 확인하지 못했습니다. 깨진 본문은 증류하지 않습니다.');
+  }
+}
+
 async function tryDirect(url) {
   const res = await fetch(url, { headers: BROWSER_HEADERS, redirect: "follow" });
   if (!res.ok) throw new Error(`direct ${res.status}`);
-  const html = await res.text();
+  const html = await responseHtml(res);
   const { title, text, images } = htmlToText(html, res.url || url);
+  requireReadable(text);
   if (text.length < 250) throw new Error("direct too short");
   return { title, text, images, via: "direct" };
 }
@@ -111,7 +141,7 @@ async function fetchImagesOnly(url) {
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) return [];
-    const root = parse(await res.text(), { blockTextElements: { script: false, style: false } });
+    const root = parse(await responseHtml(res), { blockTextElements: { script: false, style: false } });
     return extractImages(root, res.url || url);
   } catch {
     return [];
@@ -125,6 +155,7 @@ async function tryProxy(url) {
   });
   if (!res.ok) throw new Error(`proxy ${res.status}`);
   const text = (await res.text()).trim();
+  requireReadable(text);
   if (text.length < 250) throw new Error("proxy too short");
   // 프록시 응답 첫 줄이 "Title:" 형태인 경우가 많아 분리해 둔다.
   const m = text.match(/^Title:\s*(.+)$/m);
