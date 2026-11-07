@@ -43,11 +43,21 @@ const IMG_JUNK = /logo|icon|avatar|badge|sprite|emoji|favicon|banner|share|butto
 function extractImages(root, baseUrl) {
   const abs = (u) => { try { return new URL(u, baseUrl).href; } catch { return ""; } };
   const container =
+    root.querySelector(".entry_content, .entry-content, .post-content, [itemprop=articleBody]") ||
     root.querySelector("article") || root.querySelector("main") || root.querySelector("body") || root;
   const seen = new Set();
   const out = [];
   for (const img of container.querySelectorAll("img")) {
-    let src = img.getAttribute("src") || img.getAttribute("data-src") || "";
+    // Apply the cap to article figures, not earlier sidebar promotions.
+    let ancestor = img.parentNode, outsideBody = false;
+    while (ancestor && ancestor !== container) {
+      if (/^(NAV|HEADER|FOOTER|ASIDE|FORM)$/i.test(ancestor.tagName || "") &&
+          !ancestor.querySelector("figcaption")) { outsideBody = true; break; }
+      ancestor = ancestor.parentNode;
+    }
+    if (outsideBody) continue;
+    let src = img.getAttribute("data-src") || img.getAttribute("src") || "";
+    if (/^data:/i.test(src)) src = "";
     if (!src) {
       // 반응형 srcset이면 가장 큰(마지막) 후보를 쓴다.
       const ss = img.getAttribute("srcset") || img.getAttribute("data-srcset") || "";
