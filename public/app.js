@@ -893,10 +893,17 @@
     const {launch, record} = event.detail;
     let changed = false;
     records = records.map(current => {
-      if(current._pensieveLaunch !== launch || !record.contentRevision || record.contentRevision === current.contentRevision) return current;
-      changed = true;
-      const next = {...current, sections:record.sections, sourceText:record.sourceText, contentRevision:record.contentRevision, quality:record.quality};
-      delete next.reviewedSections; return next;
+      if(current._pensieveLaunch !== launch || !record.contentRevision) return current;
+      // A prior client copied the revision but left stale images/metadata behind.
+      // Reconcile the canonical fields even when the revision string is equal.
+      const next = {...current};
+      if(record.originalTitle !== undefined && current.originalTitle !== record.originalTitle)
+        next.fullTranslation = record.fullTranslation || [];
+      const fields = ['sections','sourceText','contentRevision','quality','images','url','originalTitle','koreanTitle','oneLiner','topic','publishedDate','keyTakeaways','keyQuotes','keyTerms','marketerAngle','generation','sourceVerification'];
+      for(const key of fields) if(Object.hasOwn(record,key)) next[key]=record[key];
+      delete next.reviewedSections;
+      if(JSON.stringify(next) === JSON.stringify(current)) return current;
+      changed = true; return next;
     });
     if(changed) {persist(); renderList(); const selected=records.find(r=>r.id===currentId);if(selected)show(selected);}
   });
