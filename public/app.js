@@ -932,7 +932,7 @@
     const appliedPerspective = getPerspective();
     busy(true);
     try {
-      let endpoint='/api/digest', body={url:launch.url,perspective:appliedPerspective};
+      let endpoint='/api/digest', body={url:launch.url,perspective:appliedPerspective,expectedTitle:launch.title};
       if(launch.kind==='pdf') {
         logStep('서재의 PDF를 가져오는 중…');
         const file=await window.PensieveSync.request(launch.id,'/source');

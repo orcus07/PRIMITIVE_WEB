@@ -9,6 +9,7 @@ import { PDFDocument } from "pdf-lib";
 import { PDFParse } from "pdf-parse";
 
 import { fetchArticle } from "./lib/fetchArticle.js";
+import {assertArticleSource,pdfTextContent} from './lib/sourceIdentity.js';
 import { distillArticle, distillPdf, estimateCostUsd, MODEL_LABEL, inferReaderProfile, translateFull, apiKey } from "./lib/distill.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -35,7 +36,7 @@ async function extractPdfText(base64) {
     const parser = new PDFParse({ data: new Uint8Array(buf) });
     const r = await parser.getText();
     if (parser.destroy) await parser.destroy();
-    return (r.text || "").trim();
+    return pdfTextContent(r.text || '');
   } catch {
     return "";
   }
@@ -169,11 +170,12 @@ app.get("/api/job/:id", (req, res) => {
 
 // 링크 → 본문 fetch → 증류 (백그라운드 작업으로 실행, jobId 즉시 반환)
 app.post("/api/digest", (req, res) => {
-  const { url, perspective = "" } = req.body || {};
+  const { url, perspective = "", expectedTitle = "" } = req.body || {};
   if (!url) return res.status(400).json({ error: "링크가 없습니다." });
   const job = startJob(async (onProgress) => {
     onProgress(`링크 여는 중: ${url.trim()}`);
     const fetched = await fetchArticle(url.trim(), onProgress);
+    assertArticleSource(fetched,expectedTitle);
     const srcUrl = fetched.url || url; // 트윗 공유 링크면 실제 목적지 URL
     onProgress(`본문 확보 (${fetched.text.length.toLocaleString()}자) — 증류 단계로`);
     warnIfLong(onProgress, fetched.text.length);
