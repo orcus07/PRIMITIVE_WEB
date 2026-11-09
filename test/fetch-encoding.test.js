@@ -31,3 +31,21 @@ test('unsupported encoding or replacement-filled source never reaches distillati
   await assert.rejects(()=>collect(Buffer.from(html)),/본문을 가져오지 못했습니다/);
  }
 });
+
+test('unlabelled legacy English HTML decodes Windows-1252 punctuation without a proxy',async()=>{
+ const html='<title>Maker\'s Schedule, Manager\'s Schedule</title><article>'+('Morning\x96afternoon; \x93maker\x92s schedule\x94. '.repeat(20))+'</article>';
+ for(const type of ['text/html','text/html; charset=windows-1252','text/html; charset=iso-8859-1']){
+  const result=await collect(Buffer.from(html,'latin1'),type);
+  assert.equal(result.via,'direct');
+  assert(result.text.includes('Morning–afternoon; “maker’s schedule”.'));
+  assert(!result.text.includes('\ufffd'));
+ }
+});
+
+test('invalid explicitly declared UTF-8 is not silently relabelled as Windows-1252',async()=>{
+ const body=Buffer.from('<body>'+('Morning\x96afternoon. '.repeat(30))+'</body>','latin1');
+ for(const bytes of [body,Buffer.concat([Buffer.from([0xef,0xbb,0xbf]),body])]){
+  await assert.rejects(()=>collect(bytes,'text/html; charset=utf-8'),/본문을 가져오지 못했습니다/);
+ }
+ await assert.rejects(()=>collect(Buffer.concat([Buffer.from('<meta charset="utf-8">'),body])),/본문을 가져오지 못했습니다/);
+});

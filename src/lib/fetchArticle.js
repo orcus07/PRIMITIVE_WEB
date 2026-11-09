@@ -106,6 +106,17 @@ function htmlToText(html, baseUrl = "") {
 
 // Response.text() always uses UTF-8, even when a legacy page declares Shift_JIS.
 // Decode the original bytes before parsing; U+FFFD cannot be repaired afterwards.
+function decodeHtmlBytes(bytes, encoding) {
+  const decoder = new TextDecoder(encoding, { fatal: true });
+  const text = decoder.decode(bytes);
+  // Node 24.13's Windows-1252 fast path can leave C1 bytes as Latin-1 controls.
+  // Preserve the WHATWG mapping on both that runtime and ICU-backed decoders.
+  // https://encoding.spec.whatwg.org/index-windows-1252.txt
+  const c1 = '\u20ac\u0081\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u008d\u017d\u008f\u0090\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u009d\u017e\u0178';
+  return decoder.encoding === 'windows-1252'
+    ? text.replace(/[\u0080-\u009f]/g, c => c1[c.charCodeAt(0) - 0x80]) : text;
+}
+
 async function responseHtml(res) {
   const bytes = new Uint8Array(await res.arrayBuffer());
   const charset = (value) => value?.match(/charset\s*=\s*["']?([^\s"';/>]+)/i)?.[1];
@@ -123,7 +134,16 @@ async function responseHtml(res) {
       }
     }
   }
-  return new TextDecoder(encoding || 'utf-8', { fatal: true }).decode(bytes);
+  if (encoding) return decodeHtmlBytes(bytes, encoding);
+  // Older English pages may omit charset and contain Windows-1252 punctuation.
+  // Prefer valid UTF-8 (including unlabelled multilingual pages); only use the
+  // legacy HTML fallback when no BOM/header/meta declaration would be overridden.
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (error) {
+    if (error.code !== 'ERR_ENCODING_INVALID_ENCODED_DATA') throw error;
+    return decodeHtmlBytes(bytes, 'windows-1252');
+  }
 }
 
 function requireReadable(text) {

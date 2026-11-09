@@ -71,3 +71,15 @@ PC의 수동 교정은 검증·백업 후 수행하고 클라이언트의 revisi
 
 - 빌드 실패 시 Render의 **Logs** 탭을 보면 원인이 나옵니다. 그 로그를 저에게 보여주시면 같이 고쳐요.
 - 화면은 떴는데 "ANTHROPIC_API_KEY 미설정" 경고가 뜨면 → 4단계 환경변수를 다시 확인하세요.
+
+
+## 2026-11-09 미선언 서유럽 인코딩 원문 수집
+
+Maker's Schedule, Manager's Schedule은 charset 선언 없이 0x96(Windows-1252 대시)을 포함한다.
+직접 수집의 UTF-8 strict decode가 실패하고 Render의 Jina 401까지 겹쳐 증류가 막혔다.
+BOM/HTTP/meta 선언이 있으면 그대로 엄격하게 해독한다. 선언이 없을 때만 유효한 UTF-8을
+우선 시도한 뒤 Windows-1252로 해독한다. Node 24.13의 C1 제어 문자 결과도 WHATWG
+Windows-1252 매핑으로 정규화한다. UTF-8/Shift_JIS 선언을 덮어쓰거나 손상된 본문을
+모델로 넘기는 검사를 완화하지 않았다. 인코딩이 없는 모든 언어를 자동 판별하는 기능은 아니다.
+`npm test` 15개 통과. 실제 원문 직접 수집 6,648자, 제목·끝 문단·대시·손상 문자 없음 확인.
+프록시를 401로 고정한 검사에서도 직접 수집 성공. 관련 회귀는 test/fetch-encoding.test.js.
